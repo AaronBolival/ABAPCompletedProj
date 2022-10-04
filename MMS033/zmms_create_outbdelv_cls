@@ -1,0 +1,730 @@
+*&---------------------------------------------------------------------*
+*& Include zmms_create_outbdelv_cls
+*&---------------------------------------------------------------------*
+
+class lcl_zmms33 definition.
+
+public section.
+    TYPES: BEGIN OF ty_input,
+      vstel TYPE likp-vstel,"shipping point
+      ledat TYPE string,     "Due Date
+      vbeln TYPE vbak-vbeln,"Sales Order number
+      lfimg TYPE lips-lfimg, "Delivery Quantity
+      vrkme TYPE vrkme,      "Sales unit
+    END OF ty_input.
+
+    CONSTANTS: c_1   TYPE i VALUE 1,
+               c_2   TYPE i VALUE 2,
+               c_17  TYPE i VALUE 5,
+               c_10k TYPE i VALUE 10000.
+
+    DATA: t_data TYPE filetable,
+          g_rc      TYPE i,
+          t_data_convert  TYPE STANDARD TABLE OF alsmex_tabline,
+          g_current TYPE i,
+          gt_input_data TYPE STANDARD TABLE OF ty_input,
+          gs_input_data LIKE LINE OF gt_input_data.
+
+    TYPES: BEGIN OF ty_inputstr,
+      vstel TYPE string,"shipping point
+      ledat TYPE string,     "Due Date
+      vbeln TYPE string,"Sales Order number
+      lfimg TYPE string, "Delivery Quantity
+      vrkme TYPE string,      "Sales unit
+      details type string,
+      row type string,
+    END OF ty_inputstr.
+    data: gt_strinput type standard table of ty_inputstr,
+          gs_strinput like line of gt_strinput.
+
+    methods: at_selection, upload, bapi, display_alv, al11_error, al11_archive.
+
+    "error alv
+    types: begin of ts_error,
+      item_no type i,
+      ordernum type  string,
+      reason type string,
+      color type lvc_t_scol,
+    end of ts_error.
+    data: ls_color type lvc_s_scol.
+    data: lt_error type standard table of ts_error,
+          lv_error like line of lt_error.
+
+    "For AL11
+    data lv_path type string.
+
+    TYPES: BEGIN OF ty_input_al11,
+      vstel TYPE string,"likp-vstel,"shipping point
+      ledat TYPE string,"string,"ledat,     "Due Date
+      vbeln TYPE string,"vbak-vbeln,"Sales Order number
+      lfimg TYPE string,"lips-lfimg, "Delivery Quantity
+      vrkme TYPE string,"vrkme,      "Sales unit
+      details type string,
+      row type string,"n length 20,
+    END OF ty_input_al11.
+
+    data: lt_al11error type standard table of ty_input_al11,
+          lv_al11error like line of lt_al11error.
+    data: lt_al11archive type standard table of ty_input_al11,
+          lv_al11archive like line of lt_al11archive.
+
+    data: lt_al11error_final type standard table of ty_input_al11,
+          lv_al11error_final like line of lt_al11error_final.
+    data: lt_al11archive_final type standard table of ty_input_al11,
+          lv_al11archive_final like line of lt_al11error_final.
+
+endclass.
+class lcl_zmms33 implementation.
+    method at_selection.
+*       CALL METHOD cl_gui_frontend_services=>file_open_dialog
+*          exporting
+*            file_filter             = |csv (*.csv)\|*.csv\|{ cl_gui_frontend_services=>filetype_all } |
+*          CHANGING
+*            file_table              = t_data
+*            rc                      = g_rc
+*        .
+*       READ TABLE t_data ASSIGNING FIELD-SYMBOL(<fs_data>) INDEX 1.
+*          IF sy-subrc EQ 0.
+*            p_file = <fs_data>-filename.
+*          ENDIF.
+
+    "For AL11 "MMS033TEST1CLIENT120 get path
+    "/usr/sap/S4D/RICEFW/SD/MMS/MMS033/data/in/MMS033Test.csv
+    "=====================================================================================================
+    select single  low from tvarvc into  @data(lt_path) where name = 'MMS033DATADIR'.
+*    data: lt_return_f4 type table of ddshretval.
+*
+*    call function 'F4IF_INT_TABLE_VALUE_REQUEST'
+*              EXPORTING
+*                retfield         = 'LOW'
+*                value_org        = 'S'
+*              TABLES
+*                value_tab        = lt_path
+*                return_tab       = lt_return_f4
+*              .
+*
+*            read table lt_return_f4 into data(lv_return_f4) index 1.
+*            p_file = lv_return_f4-fieldval.
+*
+*            lv_path = p_file.
+
+            data lv_str type epsdirnam.
+            lv_str = lt_path.
+
+            DATA: lv_c_fnh_mask TYPE dxfields-filemask VALUE '*.*',
+                  lv_search_dir TYPE dxfields-longpath ,
+                  lv_file_path  Type dxfields-longpath.
+
+            lv_search_dir = lv_str.
+
+              CALL FUNCTION 'F4_DXFILENAME_TOPRECURSION'
+                EXPORTING
+                  i_location_flag = 'A'
+                  i_server        = ' '
+                  i_path          = lv_search_dir
+                  filemask        = lv_c_fnh_mask
+                  fileoperation   = 'R'
+                IMPORTING
+                  o_path          = lv_file_path
+                EXCEPTIONS
+                  rfc_error       = 1
+                  OTHERS          = 2.
+
+              IF sy-subrc EQ 0.
+                p_file = lv_file_path.
+                lv_path = p_file.
+              ENDIF.
+
+     "=====================================================================================================
+
+    endmethod.
+
+    method upload.
+        "For AL11 Read Dataset
+    "===================================================================================================
+          data: lt_table type standard table of string,
+                lv_table like line of lt_table.
+
+           open DATASET lv_path for input in text mode encoding default.
+            if sy-subrc = 0.
+
+                do.
+                    if sy-subrc = 0.
+                        read dataset lv_path into lv_table.
+                        if lv_table is not initial.
+                            append lv_table to lt_table.
+                        endif.
+                    else.
+                        exit.
+                    endif.
+                enddo.
+            endif.
+            close dataset lv_path.
+
+
+
+
+      loop at lt_table into data(lv_split).
+        if sy-tabix = 1.
+            split lv_split at ',' into gs_strinput-vstel
+                                       gs_strinput-ledat
+                                       gs_strinput-vbeln
+                                       gs_strinput-lfimg
+                                       gs_strinput-vrkme
+                                       gs_strinput-details
+                                       gs_strinput-row.
+            gs_strinput-details = 'Details'.
+            gs_strinput-row = 'Row'.
+            gs_strinput-vrkme = |{ gs_strinput-vrkme alpha = in }|.
+            append gs_strinput to gt_strinput.
+        endif.
+        if sy-tabix > 1.
+
+            split lv_split at ',' into gs_input_data-vstel
+                                       gs_input_data-ledat
+                                       gs_input_data-vbeln
+                                       data(lv_lfimg)
+                                       gs_input_data-vrkme.
+
+            gs_input_data-lfimg = lv_lfimg.
+
+
+            data(lv) = | { gs_input_data-vrkme alpha = in } |.
+            gs_input_data-vrkme = |{ lv }|.
+
+
+
+
+            condense gs_input_data-vrkme.
+
+
+
+            if gs_input_data is not initial.
+                append gs_input_data to gt_input_data.
+            endif.
+
+
+        endif.
+      endloop.
+
+
+      "===================================================================================================
+
+*        CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
+*          EXPORTING
+*            filename                      = p_file
+*            i_begin_col                   = C_1
+*            i_begin_row                   = c_2
+*            i_end_col                     = c_17
+*            i_end_row                     = c_10k
+*          TABLES
+*            intern                        = t_data_convert.
+*
+*        LOOP AT t_data_convert ASSIGNING FIELD-SYMBOL(<fs_convert>).
+*            IF g_current IS INITIAL.
+*              "place value to g_current for current row being read
+*              g_current = <fs_convert>-row.
+*            ELSEIF g_current NE <fs_convert>-row.
+*              "append previous values
+*              APPEND gs_input_data TO gt_input_data.
+*              "place new value of new row being read
+*              g_current = <fs_convert>-row.
+*            ENDIF.
+*
+*            IF <fs_convert>-col EQ 1.
+*              "Shipping point
+*              gs_input_data-vstel = <fs_convert>-value.
+*            ENDIF.
+*
+*            IF <fs_convert>-col EQ 2.
+*              "Date
+*              gs_input_data-ledat = <fs_convert>-value.
+*            ENDIF.
+*
+*            IF <fs_convert>-col EQ 3.
+*               "Sales Order no
+*              gs_input_data-vbeln = <fs_convert>-value.
+*            ENDIF.
+*
+*            IF <fs_convert>-col EQ 4.
+*              "Delivery Quantity
+*              gs_input_data-lfimg = <fs_convert>-value.
+*            ENDIF.
+*
+*            IF <fs_convert>-col EQ 5.
+*              "Sales unit
+*              gs_input_data-vrkme = <fs_convert>-value.
+*            ENDIF.
+*
+*        ENDLOOP.
+*
+*        "append final value
+*        APPEND gs_input_data TO gt_input_data.
+*        CLEAR gs_input_data.
+*
+        if gt_input_data is initial.
+          message text-E04 type 'E'.
+        else.
+          data(lv_count) = lines( gt_input_data ).
+
+          message |{ text-e05 }{ lv_count }| type 'I'.
+
+          call method bapi.
+        endif.
+
+
+    endmethod.
+    method bapi.
+    " BAPI_OUTB_DELIVERY_CREATE_SLS
+
+
+
+              data: lv_commit_ret type bapiret2.
+
+              data: lv_shippoint type vstel,
+                    lv_delivery type vbeln_vl, "generated delivery number
+                    lv_num_deliveries  type vbnum.
+
+              data: lt_salesorder_items type standard table of BAPIDLVREFTOSALESORDER,
+                    lv_salesorder_items like line of lt_salesorder_items,
+                    lt_return_outbcreate type standard table of bapiret2,
+                    lv_return_outbcreate like line of lt_return_outbcreate.
+
+              data gv_item type vbap-posnr.
+              data:lv_date type ledat.
+
+           loop at gt_input_data into data(lv_input_data).
+                    data(lv_tabix) = sy-tabix.
+
+                    clear: lv_shippoint,lv_date,
+                           lv_salesorder_items,lt_salesorder_items.
+
+                    gv_item = gv_item + 10.
+
+                    lv_shippoint = lv_input_data-vstel.                   "Shipping Point
+                    lv_date = lv_input_data-ledat.                        "Due Date
+
+                    lv_salesorder_items-ref_doc = lv_input_data-vbeln.    "Sales Order Number
+                    lv_salesorder_items-ref_item = gv_item.
+                    lv_salesorder_items-dlv_qty = lv_input_data-lfimg.    "Delivery Quantity
+                    lv_salesorder_items-sales_unit = lv_input_data-vrkme. "Sales Unit
+
+                    append lv_salesorder_items to lt_salesorder_items.
+
+                    call function 'BAPI_OUTB_DELIVERY_CREATE_SLS'
+                      EXPORTING
+                        ship_point        = lv_shippoint
+                        due_date          = lv_date
+                      IMPORTING
+                        delivery          = lv_delivery
+                        num_deliveries    = lv_num_deliveries
+                      TABLES
+                        sales_order_items = lt_salesorder_items
+                        return            = lt_return_outbcreate
+                       .
+
+
+                    if lv_delivery is initial.
+                        loop at lt_return_outbcreate into lv_return_outbcreate where type = 'E'.
+                           lv_error-item_no = lv_tabix.
+                           lv_error-ordernum = |{ text-003 } { lv_delivery } { text-e06 }|.
+                           lv_error-reason = |{ lv_return_outbcreate-message }|.
+                           append lv_error to lt_error.
+                        endloop.
+
+                        "for al11 =============================
+                        lv_al11error-vstel = lv_input_data-vstel.
+                        lv_al11error-ledat = lv_input_data-ledat.
+                        lv_al11error-vbeln = lv_input_data-vbeln.
+                        lv_al11error-lfimg = lv_input_data-lfimg.
+                        lv_al11error-vrkme = lv_input_data-vrkme.
+                        lv_al11error-details = |{ text-e01 }|.
+                        lv_al11error-row =  |{ text-002 } { lv_tabix }|.
+
+                        append lv_al11error to lt_al11error.
+                        "======================================
+
+
+
+                    else.
+
+                        if lv_input_data-vstel is initial or
+                           lv_input_data-ledat is initial or
+                           lv_input_data-vbeln is initial or
+                           lv_input_data-lfimg is initial or
+                           lv_input_data-vrkme is initial.
+
+                                  lv_error-item_no = lv_tabix.
+                                  if r_test = 'X'.
+                                  lv_error-ordernum = |{ text-003 } { text-e06 }. |.
+                                  else.
+                                  lv_error-ordernum = |{ text-003 } { text-e06 }. |.
+                                  endif.
+                                  lv_error-reason = |Item no. { lv_tabix } has blank field(s)|.
+                                  append lv_error to lt_error.
+
+                                  "for al11 =============================
+                                  move-corresponding lv_input_data to lv_al11error.
+                                  lv_al11error-details = 'Failed to Upload the Data'.
+                                  lv_al11error-row =  |Row: { lv_tabix }|.
+
+                                  append lv_al11error to lt_al11error.
+                                  "======================================
+
+                                  call function 'BAPI_TRANSACTION_ROLLBACK'
+*                                    IMPORTING
+*                                      return =
+                                    .
+                        else.
+                                loop at lt_return_outbcreate into lv_return_outbcreate where type = 'S'.
+                                   lv_error-item_no = lv_tabix.
+                                   if r_test = 'X'.
+                                   lv_error-ordernum = |{ text-003 } successful|.
+                                   else.
+                                   lv_error-ordernum = |{ text-003 } { lv_delivery }|.
+                                   endif.
+                                   lv_error-reason = ''.
+                                   append lv_error to lt_error.
+                                endloop.
+
+                                "for al11 =============================
+                                lv_al11archive-vstel = lv_input_data-vstel.
+                                lv_al11archive-ledat = lv_input_data-ledat.
+                                lv_al11archive-vbeln = lv_input_data-vbeln.
+                                lv_al11archive-lfimg = lv_input_data-lfimg.
+                                lv_al11archive-vrkme = lv_input_data-vrkme.
+                                lv_al11archive-details = |{ text-e02 }|.
+                                lv_al11archive-row =  |{ text-002 } { lv_tabix }|.
+
+                                append lv_al11archive to lt_al11archive.
+                                "======================================
+
+
+                                if r_test = 'X'.
+                                   clear gv_item.
+*
+                                endif.
+                                if r_actual = 'X'.
+                                   call function 'BAPI_TRANSACTION_COMMIT'
+                                     EXPORTING
+                                       wait   = 'X'
+                                     IMPORTING
+                                       return = lv_commit_ret
+                                     .
+                                   clear gv_item.
+                                endif.
+                        endif.
+
+
+
+                    endif.
+
+
+           clear:lt_return_outbcreate,
+                 gv_item.
+
+           endloop.
+
+
+
+      " for al11 ========================================
+            if  r_actual = 'X'.
+                   if lt_al11archive is not initial.
+                             call method al11_archive.
+                   endif.
+                   if lt_al11error is not initial.
+                             call method al11_error.
+                   endif.
+            endif.
+
+
+       "===============================================
+
+      delete adjacent duplicates from lt_error comparing item_no.
+      if lt_error is not initial.
+        call method display_alv.
+      endif.
+
+    endmethod.
+    method al11_archive.
+           select single low from tvarvc into @data(lv_patharchive) where name = 'MMS033 ARCHIVE'.
+           data lv_patharch type string.
+           lv_patharch = |{ lv_patharchive }MMS033Archive{ sy-datum }{ sy-uzeit }.csv|.
+
+           data lv_al11_split_arc like line of lt_al11archive.
+
+           data: lv_string_arc type string,
+                 lv_string_arc2 type string.
+           data lv_string_arc_header type string.
+           data lv_string_arc_final type string.
+
+
+           data lv_strinput like line of gt_strinput.
+
+            data: lt_strtable_arc type standard table of string.
+
+           read table gt_strinput into data(lv_strheader_arc) index 1.
+           concatenate lv_strheader_arc-vstel
+                        lv_strheader_arc-ledat
+                        lv_strheader_arc-vbeln
+                        lv_strheader_arc-lfimg
+                        lv_strheader_arc-vrkme
+                        lv_strheader_arc-details
+                        lv_strheader_arc-row
+                        into lv_string_arc_header separated by ','.
+           append lv_string_arc_header to lt_strtable_arc.
+
+
+
+           open dataset lv_patharchive for input in text mode encoding default.
+           if sy-subrc = 0.
+             lv_patharch = |{ lv_patharchive }MMS033Archive{ sy-datum }{ sy-uzeit }.csv|.
+               open DATASET lv_patharch for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11archive into lv_al11_split_arc.
+
+                        concatenate lv_al11_split_arc-vstel lv_al11_split_arc-ledat lv_al11_split_arc-vbeln lv_al11_split_arc-lfimg lv_al11_split_arc-vrkme lv_al11_split_arc-details lv_al11_split_arc-row into lv_string_arc separated by ','.
+
+                        lv_al11_split_arc-row = |{ lv_al11_split_arc-row },|.
+
+                        append lv_string_arc to lt_strtable_arc.
+                    endloop.
+                    loop at lt_strtable_arc into lv_string_arc2.
+                        split lv_string_arc2 at ',' into lv_al11archive_final-vstel
+                                                        lv_al11archive_final-ledat
+                                                        lv_al11archive_final-vbeln
+                                                        lv_al11archive_final-lfimg
+                                                        lv_al11archive_final-vrkme
+                                                        lv_al11archive_final-details
+                                                        lv_al11archive_final-row.
+                        append lv_al11archive_final to lt_al11archive_final.
+                    endloop.
+                    clear lv_al11_split_arc.
+                    loop at lt_al11archive_final into lv_al11_split_arc.
+                        concatenate lv_al11_split_arc-vstel lv_al11_split_arc-ledat lv_al11_split_arc-vbeln lv_al11_split_arc-lfimg lv_al11_split_arc-vrkme lv_al11_split_arc-details lv_al11_split_arc-row into lv_string_arc separated by ','.
+                        transfer lv_string_arc to lv_patharch.
+                    endloop.
+
+
+                endif.
+           else.
+               open DATASET lv_patharch for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11archive into lv_al11_split_arc.
+
+                        concatenate lv_al11_split_arc-vstel lv_al11_split_arc-ledat lv_al11_split_arc-vbeln lv_al11_split_arc-lfimg lv_al11_split_arc-vrkme lv_al11_split_arc-details lv_al11_split_arc-row into lv_string_arc separated by ','.
+
+                        transfer lv_string_arc to lv_patharch.
+
+                    endloop.
+
+                endif.
+           endif.
+
+        close dataset lv_patharch.
+
+    endmethod.
+    method al11_error.
+           "===================================================================================================
+           "For Al11 Create file to error folder
+           data lv_inc type i.
+           lv_inc = lv_inc + 1. " for file number increment if needed currently not used
+
+           select single low from tvarvc into @data(lv_patherror) where name = 'MMS033 ERROR'.
+           data lv_patherr type string.
+           lv_patherr = |{ lv_patherror }MMS033Error{ sy-datum }{ sy-uzeit }.csv|.
+
+
+
+           data lv_al11_split_err like line of lt_al11error.
+
+
+            data: lv_string_err type string,
+                  lv_string_err2 type string.
+
+            data lv_string_err_header type string.
+            data lv_string_err_final type string.
+
+
+
+           data: lt_strtable_err type standard table of string.
+
+           read table gt_strinput into data(lv_strheader_err) index 1.
+           concatenate lv_strheader_err-vstel
+                        lv_strheader_err-ledat
+                        lv_strheader_err-vbeln
+                        lv_strheader_err-lfimg
+                        lv_strheader_err-vrkme
+                        lv_strheader_err-details
+                        lv_strheader_err-row
+                         into lv_string_err_header separated by ','.
+           append lv_string_err_header to lt_strtable_err.
+
+
+
+
+            " Create File Every Error
+            open DATASET lv_patherr for input in text mode encoding default.
+            if sy-subrc = 0.
+               lv_patherr = |{ lv_patherror }MMS033Error{ sy-datum }{ sy-uzeit }.csv|.
+               open DATASET lv_patherr for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11error into lv_al11_split_err.
+                        concatenate lv_al11_split_err-vstel lv_al11_split_err-ledat lv_al11_split_err-vbeln lv_al11_split_err-lfimg lv_al11_split_err-vrkme lv_al11_split_err-details lv_al11_split_err-row into lv_string_err separated by ','.
+
+
+                         lv_al11_split_err-row = |{ lv_al11_split_err-row },|.
+
+                         append lv_string_err to lt_strtable_err.
+
+                    endloop.
+                    loop at lt_strtable_err into lv_string_err2.
+
+                        split lv_string_err2 at ',' into lv_al11error_final-vstel
+                                                        lv_al11error_final-ledat
+                                                        lv_al11error_final-vbeln
+                                                        lv_al11error_final-lfimg
+                                                        lv_al11error_final-vrkme
+                                                        lv_al11error_final-details
+                                                        lv_al11error_final-row.
+                        append lv_al11error_final to lt_al11error_final.
+
+                    endloop.
+                    clear lv_al11_split_err.
+
+                    loop at lt_al11error_final into lv_al11_split_err.
+                        concatenate lv_al11_split_err-vstel lv_al11_split_err-ledat lv_al11_split_err-vbeln lv_al11_split_err-lfimg lv_al11_split_err-vrkme lv_al11_split_err-details lv_al11_split_err-row into lv_string_err separated by ','.
+                        transfer lv_string_err to lv_patherr.
+                    endloop.
+
+
+
+                endif.
+
+            else.
+                open DATASET lv_patherr for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11error into lv_al11_split_err.
+                        concatenate lv_al11_split_err-vstel lv_al11_split_err-ledat lv_al11_split_err-vbeln lv_al11_split_err-lfimg lv_al11_split_err-vrkme lv_al11_split_err-details lv_al11_split_err-row into lv_string_err separated by ','.
+
+                         lv_al11_split_err-row = |{ lv_al11_split_err-row },|.
+
+                         append lv_string_err to lt_strtable_err.
+
+                    endloop.
+                                        loop at lt_strtable_err into lv_string_err2.
+
+                        split lv_string_err2 at ',' into lv_al11error_final-vstel
+                                                        lv_al11error_final-ledat
+                                                        lv_al11error_final-vbeln
+                                                        lv_al11error_final-lfimg
+                                                        lv_al11error_final-vrkme
+                                                        lv_al11error_final-details
+                                                        lv_al11error_final-row.
+                        append lv_al11error_final to lt_al11error_final.
+
+                    endloop.
+                    clear lv_al11_split_err.
+
+                    loop at lt_al11error_final into lv_al11_split_err.
+                        concatenate lv_al11_split_err-vstel lv_al11_split_err-ledat lv_al11_split_err-vbeln lv_al11_split_err-lfimg lv_al11_split_err-vrkme lv_al11_split_err-details lv_al11_split_err-row into lv_string_err separated by ','.
+                        transfer lv_string_err to lv_patherr.
+                    endloop.
+
+                endif.
+            endif.
+
+
+            close dataset lv_patherr.
+
+            "===================================================================================================
+
+    endmethod.
+
+    method display_alv.
+        data: lo_alv type ref to cl_salv_table..
+
+        call method cl_salv_table=>factory
+          IMPORTING
+            r_salv_table   = lo_alv
+          CHANGING
+            t_table        = lt_error
+          .
+
+        "set column header : alv don't have column header. use this to set the field name of internal table
+        data: lo_columns type ref to cl_salv_columns_table,
+              lo_column type ref to cl_salv_column,
+              lt_colNames type salv_t_column_ref,
+              lv_colName like line of lt_colNames,
+              lv_txtMedium type scrtext_m.
+
+        lo_columns = lo_alv->get_columns( ).
+        lt_colNames = lo_columns->get(  ).
+        loop at lt_colNames into lv_colName.
+            lo_column = lo_columns->get_column( to_upper( lv_colName-columnname ) ).
+            lv_txtMedium = lv_colName-columnname.
+            lo_column->set_medium_text( lv_txtMedium ).
+        endloop.
+
+        "set custom header
+        lo_column = lo_columns->get_column('ITEM_NO').
+        lo_column->set_long_text( value = 'Item No.' ).
+        lo_column->set_medium_text( value = 'Item No.' ).
+        lo_column->set_short_text( value = 'Item No.' ).
+
+        lo_column = lo_columns->get_column('ORDERNUM').
+        lo_column->set_long_text( value = 'Outbound Delivery Number' ).
+        lo_column->set_medium_text( value = 'Outbound Delivery.' ).
+        lo_column->set_short_text( value = 'Outb no.' ).
+
+        lo_column = lo_columns->get_column('REASON').
+        lo_column->set_long_text( value = 'Reason if failed.' ).
+        lo_column->set_medium_text( value = 'Reason if failed.' ).
+        lo_column->set_short_text( value = 'Reason.' ).
+        " end of set column
+
+        " code logic to set color
+        lo_alv->get_columns( receiving value = lo_columns ).
+
+        try.
+            call method lo_columns->set_color_column
+              EXPORTING
+                value = 'COLOR'
+              .
+            CATCH cx_salv_data_error.
+        endtry.
+
+        loop at lt_error assigning field-symbol(<fs_data>).
+            if <fs_data>-reason is not initial.
+                ls_color-fname = 'ITEM_NO'.
+                ls_color-color-col = 6."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+
+                ls_color-fname = 'ORDERNUM'.
+                ls_color-color-col = 6."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+            elseif <fs_data>-reason = '' or <fs_data>-reason is initial or <fs_data>-reason = ' '.
+                ls_color-fname = 'ITEM_NO'.
+                ls_color-color-col = 5."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+
+                ls_color-fname = 'ORDERNUM'.
+                ls_color-color-col = 5."green
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+            endif.
+        endloop.
+        " end of set color
+
+         lo_columns->set_optimize( abap_true ).
+         lo_alv->display(  ).
+     endmethod.
+
+endclass.
