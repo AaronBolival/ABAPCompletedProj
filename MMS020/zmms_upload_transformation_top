@@ -1,0 +1,8 @@
+selection-screen begin of block b1 with frame title text-001.
+    PARAMETERS p_file TYPE string."localfile. "input file
+selection-screen end of block b1.
+
+selection-screen begin of block b2 with frame .
+PARAMETERS: r_test   RADIOBUTTON GROUP r1 DEFAULT 'X',
+           r_actual RADIOBUTTON GROUP r1.
+selection-screen end of block b2.
