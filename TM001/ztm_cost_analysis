@@ -1,0 +1,16 @@
+include:
+         ztm_cost_analysis_top,
+         ztm_cost_analysis_cls.
+
+initialization.
+    data(lo_charges_report) = new lcl_charges_report(  ).
+
+at selection-screen output.
+    lo_charges_report->show_hide(  ).
+
+at selection-screen on s_depart.
+    lo_charges_report->validate_date(  ).
+
+
+start-of-selection.
+lo_charges_report->get_data(  ).
