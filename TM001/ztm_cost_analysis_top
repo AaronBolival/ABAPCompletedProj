@@ -1,0 +1,40 @@
+*&---------------------------------------------------------------------*
+*& Include ztm_cost_analysis_top
+*&---------------------------------------------------------------------*
+
+data : v_locationID type /SCMTMS/LOCATION_ID,
+       v_timestamp type /SCMTMS/TIMESTAMP.
+
+    selection-screen: begin of block b1.
+        SELECTION-SCREEN BEGIN OF line.
+        SELECTION-SCREEN COMMENT (40) TEXT-001 for field r_sales.
+             parameters: r_sales radiobutton group rdg1 default 'X' user-command test.        "sales
+        SELECTION-SCREEN END OF line.
+
+        SELECTION-SCREEN BEGIN OF line.
+        SELECTION-SCREEN COMMENT (40) TEXT-002 for field r_stock.           "transfer stock
+             parameters: r_stock radiobutton group rdg1.
+        SELECTION-SCREEN END OF line.
+
+        SELECTION-SCREEN BEGIN OF line.
+        SELECTION-SCREEN COMMENT (40) TEXT-003 for field r_purch.
+             parameters: r_purch radiobutton group rdg1.                    "purchase
+        SELECTION-SCREEN END OF line.
+    selection-screen: end of block b1.
+
+    selection-screen: begin of block b2.
+        parameters: p_ccodev     type vbak-bukrs_vf modif id sc1  ,  " or EKKO-BUKRS        "company code
+                    p_ccodep     type ekko-bukrs modif id sc2  ,
+                    p_ccodet     type ekko-bukrs modif id sc3 ," transfer
+                    p_slsorg    type vbak-vkorg modif id sc1 ,  "sales org
+                    p_prcorg    type ekko-ekorg modif id sc2 , "purchase org
+                    p_stoorg    type ekko-ekorg modif id sc3  . "transfer
+
+
+
+        select-options: s_sloc   for v_locationID,                          "source loc
+                        s_dloc   for v_locationID,                          "destination loc
+                        s_depart for v_timestamp modif id sc1,              "depart date/time
+                        s_arrive for v_timestamp modif id sc2,              "arrival date/time
+                        s_depSTO for v_timestamp modif id sc3.
+    selection-screen: end of block b2.
