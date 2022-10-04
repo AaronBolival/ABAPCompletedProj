@@ -1,0 +1,12 @@
+*&---------------------------------------------------------------------*
+*& Include zmms_create_outbdelv_top
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME title text-001.
+*PARAMETERS p_file TYPE localfile. "input file
+PARAMETERS p_file like rlgrap-filename.
+SELECTION-SCREEN END OF BLOCK b1.
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME.
+PARAMETERS: r_test   RADIOBUTTON GROUP r1 DEFAULT 'X',
+           r_actual RADIOBUTTON GROUP r1.
+SELECTION-SCREEN END OF BLOCK b2.
