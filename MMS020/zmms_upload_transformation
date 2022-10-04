@@ -1,0 +1,16 @@
+REPORT zmms_upload_transformation.
+
+
+include: zmms_upload_transformation_top,
+         zmms_upload_transformation_cls.
+
+initialization.
+data(lo_zmms20) = new lcl_zmms20(  ).
+
+at selection-screen on value-request for p_file.
+    lo_zmms20->at_selection_file(  ).
+
+at selection-screen.
+
+start-of-selection.
+    lo_zmms20->upload(  ).
