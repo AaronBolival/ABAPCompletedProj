@@ -1,0 +1,22 @@
+REPORT zmms_create_outbdelv.
+
+include: zmms_create_outbdelv_top,
+         zmms_create_outbdelv_cls.
+
+
+
+
+initialization.
+ data(lo_zmms33) = new lcl_zmms33(  ).
+
+
+
+at selection-screen on value-request for p_file.
+    lo_zmms33->at_selection(  ).
+
+at selection-screen.
+
+
+
+start-of-selection.
+    lo_zmms33->upload(  ).
