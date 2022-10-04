@@ -1,0 +1,924 @@
+*&---------------------------------------------------------------------*
+*& Include zmms_consignment_fillup_cls
+*&---------------------------------------------------------------------*
+
+class lcl_zmms22 definition.
+    public section.
+    "Structure of Excel
+         types: begin of ts_csv,
+                batch type c1,
+                AUART type auart,
+                VKORG type vkorg,
+                VTWEG type vtweg,
+                SPART type spart,
+                KUNNR_SOLD type kunnr,
+                KUNNR_SHIP type kunnr,
+                BSTKD type bstkd,
+                MATNR type matnr,
+                KWMENG type kwmeng,
+                VRKME type vrkme,
+                KETDAT type ketdat,
+                PRSDT type prsdt,
+                WERKS type werks,
+              end of ts_csv.
+        data: lt_upload type standard table of ts_csv,
+              lv_upload like line of lt_upload.
+     "Structure of ALV
+        types: begin of ts_error,
+               item_no type i,
+               ordernum type  string,
+               reason type string,
+               color type lvc_t_scol,
+               end of ts_error.
+        data: ls_color type lvc_s_scol.
+        data: lt_error type standard table of ts_error,
+              lv_error like line of lt_error.
+
+*        data:lv_type_matnr    type DD01V-DATATYPE,
+*             lv_numc_val      type SVAL-VALUE.
+
+        " for file_open_dialog
+        data data_tab type standard table of string .
+
+        data: lv_rc type i,
+          lt_files type filetable,
+          lv_action type i.
+
+
+    TYPES: BEGIN OF ts_input_header,
+                batch type string,
+                AUART type string,
+                VKORG type string,
+                VTWEG type string,
+                SPART type string,
+                KUNNR_SOLD type string,
+                KUNNR_SHIP type string,
+                BSTKD type string,
+                MATNR type string,
+                KWMENG type string,
+                VRKME type string,
+                KETDAT type string,
+                PRSDT type string,
+                WERKS type string,
+                DETAILS type string,
+                ROW type string,
+    END OF ts_input_header.
+    data: lt_strinputheader type standard table of ts_input_header,
+          lv_strinputheader like line of lt_strinputheader.
+
+     methods: at_selection, upload,  display_alv, bapi,al11_error,al11_archive.
+
+
+    "For AL11
+    data lv_path type string.
+
+    TYPES: BEGIN OF ts_input_al11,
+                batch type string,
+                AUART type string,
+                VKORG type string,
+                VTWEG type string,
+                SPART type string,
+                KUNNR_SOLD type string,
+                KUNNR_SHIP type string,
+                BSTKD type string,
+                MATNR type string,
+                KWMENG type string,
+                VRKME type string,
+                KETDAT type string,
+                PRSDT type string,
+                WERKS type string,
+                details type string,
+                row type string,"n length 4,
+    END OF ts_input_al11.
+
+    data: lt_al11error type standard table of ts_input_al11,
+          lv_al11error like line of lt_al11error.
+    data: lt_al11archive type standard table of ts_input_al11,
+          lv_al11archive like line of lt_al11archive.
+
+    data: lt_al11error_final type standard table of ts_input_al11,
+          lv_al11error_final like line of lt_al11error_final.
+    data: lt_al11archive_final type standard table of ts_input_al11,
+          lv_al11archive_final like line of lt_al11error_final.
+
+endclass.
+
+class lcl_zmms22 implementation.
+     method at_selection.
+     "file filter csv only
+*         call method cl_gui_frontend_services=>file_open_dialog(
+*          EXPORTING
+*            file_filter             = |csv (*.csv)\|*.csv\|{ cl_gui_frontend_services=>filetype_all } |
+*          CHANGING
+*            file_table              = lt_files
+*            rc                      = lv_rc
+*          EXCEPTIONS
+*            file_open_dialog_failed = 1
+*            cntl_error              = 2
+*            error_no_gui            = 3
+*            not_supported_by_gui    = 4
+*            others                  = 5
+*        ).
+*        if lv_rc gt 0.
+*            read table lt_files index 1 into p_file.
+*        endif.
+
+    "For AL11 "MMS033TEST1CLIENT120 get path
+    "/usr/sap/S4D/RICEFW/SD/MMS/MMS033/data/in/MMS033Test.csv
+    "=====================================================================================================
+    select single  low from tvarvc into  @data(lt_path) where name = 'MMS022DATADIR'.
+
+            data lv_str type epsdirnam.
+            lv_str = lt_path.
+
+            DATA: lv_c_fnh_mask TYPE dxfields-filemask VALUE '*.*',
+                  lv_search_dir TYPE dxfields-longpath ,
+                  lv_file_path  Type dxfields-longpath.
+
+            lv_search_dir = lv_str.
+
+              CALL FUNCTION 'F4_DXFILENAME_TOPRECURSION'
+                EXPORTING
+                  i_location_flag = 'A'
+                  i_server        = ' '
+                  i_path          = lv_search_dir
+                  filemask        = lv_c_fnh_mask
+                  fileoperation   = 'R'
+                IMPORTING
+                  o_path          = lv_file_path
+                EXCEPTIONS
+                  rfc_error       = 1
+                  OTHERS          = 2.
+
+              IF sy-subrc EQ 0.
+                p_file = lv_file_path.
+                lv_path = p_file.
+              ENDIF.
+
+     "=====================================================================================================
+
+     endmethod.
+
+     method upload.
+
+        "For AL11 Read Dataset
+    "===================================================================================================
+          data: lt_table type standard table of string,
+                lv_table like line of lt_table.
+
+           open DATASET lv_path for input in text mode encoding default.
+            if sy-subrc = 0.
+
+                do.
+                    if sy-subrc = 0.
+                        read dataset lv_path into lv_table.
+                        if lv_table is not initial.
+                            append lv_table to lt_table.
+                        endif.
+                    else.
+                        exit.
+                    endif.
+                enddo.
+            endif.
+            close dataset lv_path.
+
+
+      loop at lt_table into data(lv_split).
+        if sy-tabix = 1.
+            split lv_split at ',' into lv_strinputheader-batch
+                                       lv_strinputheader-auart
+                                       lv_strinputheader-vkorg
+                                       lv_strinputheader-vtweg
+                                       lv_strinputheader-spart
+                                       lv_strinputheader-kunnr_sold
+                                       lv_strinputheader-kunnr_ship
+                                       lv_strinputheader-bstkd
+                                       lv_strinputheader-matnr
+                                       lv_strinputheader-kwmeng
+                                       lv_strinputheader-vrkme
+                                       lv_strinputheader-ketdat
+                                       lv_strinputheader-prsdt
+                                       lv_strinputheader-werks
+                                       lv_strinputheader-details
+                                       lv_strinputheader-row.
+             lv_strinputheader-details = 'Details'.
+             lv_strinputheader-row = 'Row'.
+
+             append lv_strinputheader to lt_strinputheader.
+        endif.
+        if sy-tabix > 1.
+
+            split lv_split at ',' into lv_upload-batch
+                                       lv_upload-auart(4)
+                                       lv_upload-vkorg(4)
+                                       lv_upload-vtweg(2)
+                                       lv_upload-spart(2)
+                                       lv_upload-kunnr_sold(10)
+                                       lv_upload-kunnr_ship(10)
+                                       lv_upload-bstkd(35)
+                                       lv_upload-matnr
+                                       data(lv_kwmeng)
+                                       lv_upload-vrkme(3)
+                                       lv_upload-ketdat(8)
+                                       lv_upload-prsdt(8)
+                                       data(lv_werks).
+
+* if sy-subrc = 0.
+            lv_upload-kwmeng = lv_kwmeng .
+
+
+            lv_upload-werks(4) = lv_werks.
+
+
+            lv_upload-matnr(18) = |{ lv_upload-matnr alpha = IN }|.
+            lv_upload-vtweg = |{ lv_upload-vtweg alpha = in }|.
+            lv_upload-spart = |{ lv_upload-spart alpha = in }|.
+
+            condense: lv_upload-batch , lv_upload-auart, lv_upload-vkorg, lv_upload-vtweg, lv_upload-spart, lv_upload-kunnr_sold, lv_upload-kunnr_ship, lv_upload-bstkd, lv_upload-matnr, lv_upload-vrkme, lv_upload-ketdat, lv_upload-prsdt.
+
+
+*            if  lv_upload-batch is not initial  and
+*                lv_upload-auart is not initial  and
+*                lv_upload-vkorg is not initial  and
+*                lv_upload-vtweg is not initial  and
+*                lv_upload-spart is not initial  and
+*                lv_upload-kunnr_sold is not initial  and
+*                lv_upload-kunnr_ship is not initial  and
+*                lv_upload-bstkd is not initial  and
+*                lv_upload-matnr is not initial  and
+*                lv_upload-kwmeng is not initial  and
+*                lv_upload-vrkme is not initial  and
+*                lv_upload-ketdat is not initial  and
+*                lv_upload-prsdt is not initial  and
+*                lv_upload-werks is not initial .
+            if lv_upload is not initial.
+
+            append lv_upload to lt_upload.
+
+            endif.
+*else.
+*           message 'Upload Failed' type 'E'.
+*endif.
+
+
+        endif.
+      endloop.
+
+
+* ======================================================================================================
+*         call method cl_gui_frontend_services=>gui_upload
+*          EXPORTING
+*            filename                = p_file
+*            has_field_separator     = abap_true
+*          CHANGING
+*            data_tab                = data_tab
+*          EXCEPTIONS
+*            file_open_error         = 1
+*            file_read_error         = 2
+*            no_batch                = 3
+*            gui_refuse_filetransfer = 4
+*            invalid_type            = 5
+*            no_authority            = 6
+*            unknown_error           = 7
+*            bad_data_format         = 8
+*            header_not_allowed      = 9
+*            separator_not_allowed   = 10
+*            header_too_long         = 11
+*            unknown_dp_error        = 12
+*            access_denied           = 13
+*            dp_out_of_memory        = 14
+*            disk_full               = 15
+*            dp_timeout              = 16
+*            not_supported_by_gui    = 17
+*            error_no_gui            = 18
+*            others                  = 19
+*          .
+*            " split data_tab data after ' , ' and append to internal table
+*            loop at data_tab into data(wa).
+*
+*            if sy-tabix > 1.
+*                split wa at ',' into lv_upload-batch
+*                                     lv_upload-auart(4)
+*                                     lv_upload-vkorg(4)
+*                                     lv_upload-vtweg(2)
+*                                     lv_upload-spart(2)
+*                                     lv_upload-kunnr_sold(10)
+*                                     lv_upload-kunnr_ship(10)
+*                                     lv_upload-bstkd(35)
+*                                     lv_upload-matnr
+*                                     data(kwmeng)
+*                                     lv_upload-vrkme(3)
+*                                     lv_upload-ketdat(8)
+*                                     lv_upload-prsdt(8)
+*                                     lv_upload-werks(4).
+*
+*                lv_upload-kwmeng = kwmeng .
+*
+*
+*                lv_upload-matnr(18) = |{ lv_upload-matnr alpha = IN }|.
+*                lv_upload-vtweg = |{ lv_upload-vtweg alpha = in }|.
+*                lv_upload-spart = |{ lv_upload-spart alpha = in }|.
+*
+*                append lv_upload to lt_upload.
+*            endif.
+*            endloop.
+*
+*
+            if lt_upload is initial.
+                message text-E03 type 'E'.
+            else.
+                data(lv_count) = lines( lt_upload ).
+                message |{ text-E04 } { lv_count }| type 'I'.
+
+                call method bapi.
+            endif.
+
+     endmethod.
+
+
+
+     method bapi.
+*         BAPI_SALESORDER_CREATEFROMDAT2 , BAPI_TRANSACTION_COMMIT
+                    data:   "exporting
+                            lv_sales_document_in type BAPIVBELN-VBELN,
+                            lv_order_header_in type bapisdhd1,
+                            lv_order_header_inx type bapisdhd1x,
+                            lv_sales_document type bapivbeln-vbeln,
+
+                            lt_return type standard table of bapiret2,
+                            "tables
+                            lt_order_items_in type standard table of bapisditm,
+                            lv_order_items_in like line of lt_order_items_in,
+
+                            lt_order_items_inx type standard table of bapisditmx,
+                            lv_order_item_inx like line of lt_order_items_inx,
+
+                            lt_order_partners type standard table of bapiparnr,
+                            lv_order_partners like line of lt_order_partners,
+
+                            lt_order_schedules_in type standard table of bapischdl,
+                            lv_order_schedules_in like line of lt_order_schedules_in,
+
+                            lt_order_schedules_inx type standard table of  bapischdlx,
+                            lv_order_schedules_inx like line of lt_order_schedules_inx,
+
+                            lt_order_conditions_in type standard table of bapicond,
+                            lv_order_conditions_in like line of lt_order_conditions_in,
+
+
+                            lt_order_conditions_inx type standard table of bapicondx,
+                            lv_order_conditions_inx like line of lt_order_conditions_inx.
+
+                   data: lt_return_commit type  bapiret2.
+
+                   data lv_upload1 type ts_csv.
+                   data gv_item type vbap-posnr.
+
+                   data lv_error_bapi like line of lt_return.
+                   clear: lt_error[], lv_error.
+
+                   loop at lt_upload into lv_upload1.
+
+                    data(lv_upload1_tabix) = sy-tabix.
+
+
+
+
+                     "retrieve the sales order type description
+                     select single BEZEI from tvakt into @data(lv_bezei) where auart = @lv_upload1-auart and spras = 'E'.
+
+                     clear:
+                            lv_order_header_in, lv_order_header_inx,
+                            lt_order_partners, lv_order_partners,
+                            lt_order_items_in, lt_order_items_inx,
+                            lt_order_schedules_in, lt_order_schedules_inx.
+
+
+                    "header data
+                     lv_order_header_in-doc_type = lv_upload1-auart. "Sales Order Type   | mandatory
+                     lv_order_header_in-sales_org = lv_upload1-vkorg. "Sales Organization | | Mandatory
+                     lv_order_header_in-distr_chan = lv_upload1-vtweg. " Distribution Channel | Mandatory
+                     lv_order_header_in-division = lv_upload1-spart. " Division | Mandatory
+                     lv_order_header_in-purch_no_c = lv_upload1-bstkd. "Customer reference
+                     lv_order_header_in-req_date_h = lv_upload1-ketdat. "Required Delivery Date
+
+
+                     lv_order_header_inx-updateflag = 'I'. "insert I update U
+                     lv_order_header_inx-doc_type   = 'X'.
+                     lv_order_header_inx-sales_org  = 'X'.
+                     lv_order_header_inx-distr_chan = 'X'.
+                     lv_order_header_inx-division   = 'X'.
+                     lv_order_header_inx-purch_no_c = 'X'.
+                     lv_order_header_inx-req_date_h = 'X'.
+
+
+                     "partner data
+                     lv_order_partners-partn_role = 'AG'. "AG = sold to party
+                     lv_order_partners-partn_numb = lv_upload1-kunnr_sold. " Mandatory
+                     append lv_order_partners to lt_order_partners.
+
+                     lv_order_partners-partn_role = 'WE'. "WE = ship to party
+                     lv_order_partners-partn_numb = lv_upload1-kunnr_ship. " Mandatory
+                     append lv_order_partners to lt_order_partners.
+
+
+                      gv_item = gv_item + 10.
+
+                      "item data
+                      lv_order_items_in-itm_number  = gv_item.
+                      lv_order_items_in-material = lv_upload1-matnr. "lv_upload1-matnr. "Material number | Mandatory
+                      lv_order_items_in-target_qty = lv_upload1-kwmeng. "Sales Quantity
+                      lv_order_items_in-plant = lv_upload1-werks.  " Plant
+                      lv_order_items_in-purch_no_c = lv_upload1-bstkd. " Customer Reference
+                      lv_order_items_in-sales_unit = lv_upload1-vrkme. " Sales Unit
+                      lv_order_items_in-division = lv_upload1-spart. "Division
+                      lv_order_items_in-price_date = lv_upload1-prsdt. " Price Date
+                      lv_order_items_in-purch_no_s = lv_upload1-bstkd. "
+                      append lv_order_items_in to lt_order_items_in.
+
+                      lv_order_item_inx-itm_number  = gv_item. "
+                      lv_order_item_inx-material = 'X'.
+                      lv_order_item_inx-target_qty = 'X'. "
+                      lv_order_item_inx-plant = 'X'.
+                      lv_order_item_inx-purch_no_c = 'X'.
+                      lv_order_item_inx-sales_unit = 'X'.
+                      lv_order_item_inx-division = 'X'.
+                      lv_order_item_inx-price_date = 'X'.
+                      lv_order_item_inx-purch_no_s = 'X'.
+                      append lv_order_item_inx to lt_order_items_inx.
+
+
+                     "order_schedules_in
+                      lv_order_schedules_in-itm_number  = gv_item.
+                      lv_order_schedules_in-req_date = lv_upload1-prsdt. "
+                      lv_order_schedules_in-req_qty = lv_upload1-kwmeng. " Sales unit
+                      append lv_order_schedules_in to lt_order_schedules_in.
+
+
+                      lv_order_schedules_inx-itm_number  = gv_item.
+                      lv_order_schedules_inx-req_date = 'X'. "
+                      lv_order_schedules_inx-req_qty = 'X'.
+                      append lv_order_schedules_inx to lt_order_schedules_inx.
+
+                      "Generate new sales order number for correct
+                      call function 'BAPI_SALESORDER_CREATEFROMDAT2'
+                        EXPORTING
+                          order_header_in         = lv_order_header_in
+                          order_header_inx        = lv_order_header_inx
+                        IMPORTING
+                          salesdocument           = lv_sales_document
+                        TABLES
+                          return                  = lt_return
+                          order_items_in          = lt_order_items_in
+                          order_items_inx         = lt_order_items_inx
+                          order_partners          = lt_order_partners
+                          order_schedules_in      = lt_order_schedules_in
+                          order_schedules_inx     = lt_order_schedules_inx
+                        .
+
+
+
+
+                       if lv_sales_document is initial.
+
+                               loop at lt_return into lv_error_bapi where type = 'E'.
+                                  lv_error-item_no = lv_upload1_tabix.
+                                  lv_error-ordernum = |{ lv_bezei } { lv_sales_document } { text-E02 } |.
+                                  lv_error-reason = lv_error_bapi-message.
+                                  append lv_error to lt_error.
+                               endloop.
+
+
+                        "for al11 =============================
+                        move-corresponding lv_upload1 to lv_al11error.
+                        lv_al11error-details = 'Failed to Upload the Data'.
+                        lv_al11error-row =  |Row: { lv_upload1_tabix }|.
+
+                        append lv_al11error to lt_al11error.
+                        "======================================
+                       else.
+                           "Required Delivery Date - this is for date validation do not allow past date
+                           data: lv_date_delv type sy-datum,
+                                 lv_datevar_delv type i.
+                           lv_date_delv = lv_upload1-ketdat.
+                           lv_datevar_delv = sy-datum - lv_date_delv .
+                           data(lv_delvdate_result) = |{ lv_datevar_delv sign = left }|.
+
+                           "Price Date - this is for date validation do not allow past date
+                           data: lv_date_price type sy-datum,
+                                 lv_datevar_price type i.
+                           lv_date_price = lv_upload1-prsdt.
+                           lv_datevar_price = sy-datum - lv_date_price .
+                           data(lv_pricedate_result) = |{ lv_datevar_price sign = left }|.
+
+
+                           if     lv_delvdate_result > 0 or lv_pricedate_result > 0.
+                                  lv_error-item_no = lv_upload1_tabix.
+                                  lv_error-ordernum = |{ lv_bezei } { text-E02 } |.
+                                  lv_error-reason = |{ text-E07 }|.
+                                  append lv_error to lt_error.
+
+                                  "for al11 =============================
+                                  move-corresponding lv_upload1 to lv_al11error.
+                                  lv_al11error-details = 'Failed to Upload the Data'.
+                                  lv_al11error-row =  |Row: { lv_upload1_tabix }|.
+
+                                  append lv_al11error to lt_al11error.
+                                  "======================================
+
+                           else.
+
+                               if  "lv_upload1-batch is initial or
+                                   lv_upload1-auart is initial or
+                                   lv_upload1-vkorg is initial or
+                                   lv_upload1-vtweg is initial or
+                                   lv_upload1-spart is initial or
+                                   lv_upload1-kunnr_sold is initial or
+                                   lv_upload1-kunnr_ship is initial or
+                                   lv_upload1-bstkd is initial or
+                                   lv_upload1-matnr is initial or
+                                   lv_upload1-kwmeng is initial or
+                                   lv_upload1-vrkme is initial or
+                                   lv_upload1-ketdat is initial or
+                                   lv_upload1-prsdt is initial or
+                                   lv_upload1-werks is initial .
+
+                                  lv_error-item_no = lv_upload1_tabix.
+                                  if r_test = 'X'.
+                                  lv_error-ordernum = |{ lv_bezei } { text-E02 }. |.
+                                  else.
+                                  lv_error-ordernum = |{ lv_bezei } { text-E02 }. |.
+                                  endif.
+                                  lv_error-reason = |Item no. { lv_upload1_tabix } has blank field(s)|.
+                                  append lv_error to lt_error.
+
+                                  "for al11 =============================
+                                  move-corresponding lv_upload1 to lv_al11error.
+                                  lv_al11error-details = 'Failed to Upload the Data'.
+                                  lv_al11error-row =  |Row: { lv_upload1_tabix }|.
+
+                                  append lv_al11error to lt_al11error.
+                                  "======================================
+
+                                  call function 'BAPI_TRANSACTION_ROLLBACK'
+*                                    IMPORTING
+*                                      return =
+                                    .
+
+                               else.
+                                  loop at lt_return into lv_error_bapi where type = 'S'.
+                                      lv_error-item_no = lv_upload1_tabix.
+                                      if r_test = 'X'.
+                                      lv_error-ordernum = |{ lv_bezei } successful . |.
+                                      else.
+                                      lv_error-ordernum = |{ lv_bezei } { lv_sales_document } . |.
+                                      endif.
+                                      lv_error-reason = ''.
+                                      append lv_error to lt_error.
+                                  endloop.
+                                 move-corresponding lv_upload1 to lv_al11archive.
+                                 lv_al11archive-details = 'Successfuly Upload the Data'.
+                                 lv_al11archive-row =  |Row: { lv_upload1_tabix }|.
+                                 append lv_al11archive to lt_al11archive.
+                                if r_test = 'X'.
+                                  clear: gv_item.
+                                endif.
+                                   "Insert data to table
+                                   if r_actual = 'X'.
+                                       call function 'BAPI_TRANSACTION_COMMIT'
+                                          EXPORTING
+                                            wait   = 'X'
+                                          IMPORTING
+                                            return = lt_return_commit
+                                       .
+                                       clear: gv_item.
+                                   endif.
+                               endif.
+
+                            endif.
+
+                       endif.
+                        clear:gv_item, lt_return.
+                   endloop.
+
+            " for al11 ========================================
+            if  r_actual = 'X'.
+                   if lt_al11archive is not initial.
+                             call method al11_archive.
+                   endif.
+                   if lt_al11error is not initial.
+                             call method al11_error.
+                   endif.
+            endif.
+
+      delete adjacent duplicates from lt_error comparing item_no.
+      if lt_error is not initial.
+        call method display_alv.
+      endif.
+
+
+
+     endmethod.
+
+    method al11_archive.
+        select single low from tvarvc into @data(lv_patharchive) where name = 'MMS022 ARCHIVE'.
+        data lv_patharc type string.
+        lv_patharc = |{ lv_patharchive }MMS022Archive{ sy-datum }{ sy-uzeit }|.
+
+        data lv_al11_split_arc like line of lt_al11archive.
+
+        data: lv_string_arc type string,
+              lv_string_arc2 type string,
+              lv_string_arc_header type string,
+              lv_string_arc_final type string.
+
+        data: lv_strinput like line of lt_strinputheader.
+
+        data: lt_strtabledata_arc type standard table of string.
+        read table lt_strinputheader into data(lv_strinputheader_arc) index 1.
+
+        concatenate lv_strinputheader_arc-batch
+                    lv_strinputheader_arc-auart
+                    lv_strinputheader_arc-vkorg
+                    lv_strinputheader_arc-vtweg
+                    lv_strinputheader_arc-spart
+                    lv_strinputheader_arc-kunnr_sold
+                    lv_strinputheader_arc-kunnr_ship
+                    lv_strinputheader_arc-bstkd
+                    lv_strinputheader_arc-matnr
+                    lv_strinputheader_arc-kwmeng
+                    lv_strinputheader_arc-vrkme
+                    lv_strinputheader_arc-ketdat
+                    lv_strinputheader_arc-prsdt
+                    lv_strinputheader_arc-werks
+                    lv_strinputheader_arc-details
+                    lv_strinputheader_arc-row
+                    into lv_string_arc_header separated by ','.
+        append lv_string_arc_header to lt_strtabledata_arc.
+
+        open dataset lv_patharchive for input in text mode encoding default.
+        if sy-subrc = 0.
+*            lv_patharc = |{ lv_patharchive }MMS022Archive{ sy-datum }{ sy-uzeit }.csv|.
+            open dataset lv_patharc for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11archive into lv_al11_split_arc.
+                        concatenate lv_al11_split_arc-batch
+                                    lv_al11_split_arc-auart
+                                    lv_al11_split_arc-vkorg
+                                    lv_al11_split_arc-vtweg
+                                    lv_al11_split_arc-spart
+                                    lv_al11_split_arc-kunnr_sold
+                                    lv_al11_split_arc-kunnr_ship
+                                    lv_al11_split_arc-bstkd
+                                    lv_al11_split_arc-matnr
+                                    lv_al11_split_arc-kwmeng
+                                    lv_al11_split_arc-vrkme
+                                    lv_al11_split_arc-ketdat
+                                    lv_al11_split_arc-prsdt
+                                    lv_al11_split_arc-werks
+                                    lv_al11_split_arc-details
+                                    lv_al11_split_arc-row
+                                    into lv_string_arc separated by ','.
+                         append lv_string_arc to lt_strtabledata_arc.
+                    endloop.
+                    loop at lt_strtabledata_arc into lv_string_arc2.
+                        split lv_string_arc2 at ',' into lv_al11archive_final-batch
+                                                        lv_al11archive_final-auart
+                                                        lv_al11archive_final-vkorg
+                                                        lv_al11archive_final-vtweg
+                                                        lv_al11archive_final-spart
+                                                        lv_al11archive_final-kunnr_sold
+                                                        lv_al11archive_final-kunnr_ship
+                                                        lv_al11archive_final-bstkd
+                                                        lv_al11archive_final-matnr
+                                                        lv_al11archive_final-kwmeng
+                                                        lv_al11archive_final-vrkme
+                                                        lv_al11archive_final-ketdat
+                                                        lv_al11archive_final-prsdt
+                                                        lv_al11archive_final-werks
+                                                        lv_al11archive_final-details
+                                                        lv_al11archive_final-row.
+
+                        append lv_al11archive_final to lt_al11archive_final.
+                    endloop.
+                    clear lv_al11_split_arc.
+                    loop at lt_al11archive_final into lv_al11_split_arc.
+                        concatenate lv_al11_split_arc-batch
+                                    lv_al11_split_arc-auart
+                                    lv_al11_split_arc-vkorg
+                                    lv_al11_split_arc-vtweg
+                                    lv_al11_split_arc-spart
+                                    lv_al11_split_arc-kunnr_sold
+                                    lv_al11_split_arc-kunnr_ship
+                                    lv_al11_split_arc-bstkd
+                                    lv_al11_split_arc-matnr
+                                    lv_al11_split_arc-kwmeng
+                                    lv_al11_split_arc-vrkme
+                                    lv_al11_split_arc-ketdat
+                                    lv_al11_split_arc-prsdt
+                                    lv_al11_split_arc-werks
+                                    lv_al11_split_arc-details
+                                    lv_al11_split_arc-row
+                                    into lv_string_arc separated by ','.
+                        transfer lv_string_arc to lv_patharc.
+                    endloop.
+
+                endif.
+        endif.
+
+
+    endmethod.
+    method al11_error.
+        select single low from tvarvc into @data(lv_patharchive) where name = 'MMS022 ERROR'.
+        data lv_patherr type string.
+        lv_patherr = |{ lv_patharchive }MMS022Error{ sy-datum }{ sy-uzeit }|.
+
+        data lv_al11_split_err like line of lt_al11error.
+
+        data: lv_string_err type string,
+              lv_string_err2 type string,
+              lv_string_err_header type string,
+              lv_string_err_final type string.
+
+        data: lv_strinput_err like line of lt_strinputheader.
+
+        data: lt_strtabledata_err type standard table of string.
+        read table lt_strinputheader into data(lv_strinputheader_err) index 1.
+
+        concatenate lv_strinputheader_err-batch
+                    lv_strinputheader_err-auart
+                    lv_strinputheader_err-vkorg
+                    lv_strinputheader_err-vtweg
+                    lv_strinputheader_err-spart
+                    lv_strinputheader_err-kunnr_sold
+                    lv_strinputheader_err-kunnr_ship
+                    lv_strinputheader_err-bstkd
+                    lv_strinputheader_err-matnr
+                    lv_strinputheader_err-kwmeng
+                    lv_strinputheader_err-vrkme
+                    lv_strinputheader_err-ketdat
+                    lv_strinputheader_err-prsdt
+                    lv_strinputheader_err-werks
+                    lv_strinputheader_err-details
+                    lv_strinputheader_err-row
+                    into lv_string_err_header separated by ','.
+        append lv_string_err_header to lt_strtabledata_err.
+
+        open dataset lv_patharchive for input in text mode encoding default.
+        if sy-subrc = 0.
+
+            open dataset lv_patherr for output in text mode encoding default.
+                if sy-subrc = 0.
+                    loop at lt_al11error into lv_al11_split_err.
+                        concatenate lv_al11_split_err-batch
+                                    lv_al11_split_err-auart
+                                    lv_al11_split_err-vkorg
+                                    lv_al11_split_err-vtweg
+                                    lv_al11_split_err-spart
+                                    lv_al11_split_err-kunnr_sold
+                                    lv_al11_split_err-kunnr_ship
+                                    lv_al11_split_err-bstkd
+                                    lv_al11_split_err-matnr
+                                    lv_al11_split_err-kwmeng
+                                    lv_al11_split_err-vrkme
+                                    lv_al11_split_err-ketdat
+                                    lv_al11_split_err-prsdt
+                                    lv_al11_split_err-werks
+                                    lv_al11_split_err-details
+                                    lv_al11_split_err-row
+                                    into lv_string_err separated by ','.
+                         append lv_string_err to lt_strtabledata_err.
+                    endloop.
+                    loop at lt_strtabledata_err into lv_string_err2.
+                        split lv_string_err2 at ',' into lv_al11error_final-batch
+                                                        lv_al11error_final-auart
+                                                        lv_al11error_final-vkorg
+                                                        lv_al11error_final-vtweg
+                                                        lv_al11error_final-spart
+                                                        lv_al11error_final-kunnr_sold
+                                                        lv_al11error_final-kunnr_ship
+                                                        lv_al11error_final-bstkd
+                                                        lv_al11error_final-matnr
+                                                        lv_al11error_final-kwmeng
+                                                        lv_al11error_final-vrkme
+                                                        lv_al11error_final-ketdat
+                                                        lv_al11error_final-prsdt
+                                                        lv_al11error_final-werks
+                                                        lv_al11error_final-details
+                                                        lv_al11error_final-row.
+
+                        append lv_al11error_final to lt_al11error_final.
+                    endloop.
+                    clear lv_al11_split_err.
+                    loop at lt_al11error_final into lv_al11_split_err.
+                        concatenate lv_al11_split_err-batch
+                                    lv_al11_split_err-auart
+                                    lv_al11_split_err-vkorg
+                                    lv_al11_split_err-vtweg
+                                    lv_al11_split_err-spart
+                                    lv_al11_split_err-kunnr_sold
+                                    lv_al11_split_err-kunnr_ship
+                                    lv_al11_split_err-bstkd
+                                    lv_al11_split_err-matnr
+                                    lv_al11_split_err-kwmeng
+                                    lv_al11_split_err-vrkme
+                                    lv_al11_split_err-ketdat
+                                    lv_al11_split_err-prsdt
+                                    lv_al11_split_err-werks
+                                    lv_al11_split_err-details
+                                    lv_al11_split_err-row
+                                    into lv_string_err separated by ','.
+                        transfer lv_string_err to lv_patherr.
+                    endloop.
+
+                endif.
+        endif.
+    endmethod.
+
+     method display_alv.
+        data: lo_alv type ref to cl_salv_table.
+
+        call method cl_salv_table=>factory
+          IMPORTING
+            r_salv_table   = lo_alv
+          CHANGING
+            t_table        = lt_error
+          .
+
+        "set column header : alv don't have column header. use this to set the field name of internal table
+        data: lo_columns type ref to cl_salv_columns_table,
+              lo_column type ref to cl_salv_column,
+              lt_colNames type salv_t_column_ref,
+              lv_colName like line of lt_colNames,
+              lv_txtMedium type scrtext_m.
+
+        lo_columns = lo_alv->get_columns( ).
+        lt_colNames = lo_columns->get(  ).
+        loop at lt_colNames into lv_colName.
+            lo_column = lo_columns->get_column( to_upper( lv_colName-columnname ) ).
+            lv_txtMedium = lv_colName-columnname.
+            lo_column->set_medium_text( lv_txtMedium ).
+        endloop.
+
+        "set custom header
+        lo_column = lo_columns->get_column('ITEM_NO').
+        lo_column->set_long_text( value = 'Item No.' ).
+        lo_column->set_medium_text( value = 'Item No.' ).
+        lo_column->set_short_text( value = 'Item No.' ).
+
+        lo_column = lo_columns->get_column('ORDERNUM').
+        lo_column->set_long_text( value = 'Consignment Fill Up Order Number' ).
+        lo_column->set_medium_text( value = 'Consignment Order.' ).
+        lo_column->set_short_text( value = 'Order No.' ).
+
+        lo_column = lo_columns->get_column('REASON').
+        lo_column->set_long_text( value = 'Reason if failed.' ).
+        lo_column->set_medium_text( value = 'Reason if failed.' ).
+        lo_column->set_short_text( value = 'Reason.' ).
+        " end of set column
+
+        " code logic to set color
+        lo_alv->get_columns( receiving value = lo_columns ).
+
+        try.
+            call method lo_columns->set_color_column
+              EXPORTING
+                value = 'COLOR'
+              .
+            CATCH cx_salv_data_error.
+        endtry.
+
+        loop at lt_error assigning field-symbol(<fs_data>).
+            if <fs_data>-reason is not initial.
+                ls_color-fname = 'ITEM_NO'.
+                ls_color-color-col = 6."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+
+                ls_color-fname = 'ORDERNUM'.
+                ls_color-color-col = 6."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+            elseif <fs_data>-reason = '' or <fs_data>-reason is initial or <fs_data>-reason = ' '.
+                ls_color-fname = 'ITEM_NO'.
+                ls_color-color-col = 5."red
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+
+                ls_color-fname = 'ORDERNUM'.
+                ls_color-color-col = 5."green
+                ls_color-color-int = 0.
+                ls_color-color-inv = 0.
+                append  ls_color to <fs_data>-color.
+            endif.
+        endloop.
+        " end of set color
+
+         lo_columns->set_optimize( abap_true ).
+         lo_alv->display(  ).
+     endmethod.
+
+endclass.
