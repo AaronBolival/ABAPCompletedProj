@@ -1,0 +1,14 @@
+REPORT zmms_consignment_fillup.
+
+include: zmms_consignment_fillup_top,
+         zmms_consignment_fillup_cls.
+
+initialization.
+ data(lo_zmms22) = new lcl_zmms22(  ).
+
+at selection-screen on value-request for p_file.
+    lo_zmms22->at_selection(  ).
+
+at selection-screen.
+lo_zmms22->upload(  ).
+start-of-selection.
