@@ -1,0 +1,562 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_VK11_ZPR0_UPL_INC
+*&---------------------------------------------------------------------*
+
+
+**********************************************************************
+*Upload File
+**********************************************************************
+
+FORM upload_file.
+  IF lv_path_extension = 'CSV'.
+
+    CALL FUNCTION 'KCD_CSV_FILE_TO_INTERN_CONVERT'
+      EXPORTING
+        i_filename      = lv_filename
+        i_separator     = ','
+      TABLES
+        e_intern        = lt_uploaded_contents
+      EXCEPTIONS
+        upload_csv      = 1
+        upload_filetype = 2
+        OTHERS          = 3.
+
+    LOOP AT lt_uploaded_contents INTO lv_uploaded_contents.
+      TRANSLATE lv_uploaded_contents-value TO UPPER CASE.
+      CONDENSE lv_uploaded_contents-value NO-GAPS.
+      IF lv_uploaded_contents-col = '2'  OR "Sales Org 7
+         lv_uploaded_contents-col = '3'  OR "Dist Chnl 8
+         lv_uploaded_contents-col = '6' OR "Price Group 11
+         lv_uploaded_contents-col = '13'  "Per 18
+
+         .
+        IF lv_uploaded_contents-row <> 1."^[1-9]\d*(\.\d+)?$
+          REPLACE ALL OCCURRENCES OF REGEX '[^(0-9)]' IN lv_uploaded_contents-value WITH ''.
+        ENDIF.
+      ENDIF.
+      MOVE lv_uploaded_contents-col TO lv_index.
+      ASSIGN COMPONENT lv_index OF STRUCTURE lv_file_contents TO <fs_uploaded_contents>.
+      MOVE lv_uploaded_contents-value TO <fs_uploaded_contents>.
+      AT END OF row.
+        APPEND lv_file_contents TO lt_file_contents.
+        "For header template
+        IF lv_uploaded_contents-row = 1.
+          MOVE-CORRESPONDING lv_file_contents TO lv_header_template.
+        ENDIF.
+        "end of header template
+        CLEAR: lv_file_contents.
+      ENDAT.
+    ENDLOOP.
+
+  ENDIF.
+  IF lv_path_extension = 'XLSX' OR lv_path_extension = 'XLS'.
+    lv_localfile = lv_filename.
+    CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+      EXPORTING
+*       i_field_seperator    =
+        i_line_header        = ' '
+        i_tab_raw_data       = lt_raw
+        i_filename           = lv_localfile
+      TABLES
+        i_tab_converted_data = lt_file_contents
+      EXCEPTIONS
+        conversion_failed    = 1
+        OTHERS               = 2.
+
+
+    LOOP AT lt_file_contents INTO lv_file_contents.
+
+      "Translate all fields to Upper Case
+      DO 14 TIMES. "19 = Number of columns in internal table
+         ASSIGN COMPONENT sy-index OF STRUCTURE lv_file_contents TO <fs_file_contents>.
+         IF <fs_file_contents> IS NOT INITIAL.
+            TRANSLATE <fs_file_contents> TO UPPER CASE.
+         ENDIF.
+      ENDDO.
+
+      IF sy-tabix <> 1.
+
+        REPLACE ALL OCCURRENCES OF REGEX '[^(0-9)]' IN lv_file_contents-col7 WITH ''.
+        REPLACE ALL OCCURRENCES OF REGEX '[^(0-9)]' IN lv_file_contents-col8 WITH ''.
+        REPLACE ALL OCCURRENCES OF REGEX '[^(0-9)]' IN lv_file_contents-col11 WITH ''.
+        REPLACE ALL OCCURRENCES OF REGEX '[^(0-9)]' IN lv_file_contents-col18 WITH ''.
+
+        MODIFY lt_file_contents FROM lv_file_contents INDEX sy-tabix.
+
+      ENDIF.
+
+      IF sy-tabix = 1.
+        MOVE-CORRESPONDING lv_file_contents TO lv_header_template.
+      ENDIF.
+    ENDLOOP.
+
+  ENDIF.
+ENDFORM.
+
+FORM file_columns.
+  "Check Template
+  lv_header_template_check-col1 = 'KSCHL'.
+*  lv_header_template_check-col2 = 'SELKZ05(907)'.
+*  lv_header_template_check-col3 = 'SELKZ04(911)'.
+*  lv_header_template_check-col4 = 'SELKZ03(910)'.
+*  lv_header_template_check-col5 = 'SELKZ02(985)'.
+*  lv_header_template_check-col6 = 'SELKZ01(995)'.
+  lv_header_template_check-col7 = 'VKORG'.
+  lv_header_template_check-col8 = 'VTWEG'.
+  lv_header_template_check-col9 = 'KUNNR'.
+  lv_header_template_check-col10 = 'KUNWE'.
+  lv_header_template_check-col11 = 'KONDA'.
+  lv_header_template_check-col12 = 'MATNR'.
+  lv_header_template_check-col13 = 'DATAB(DDMMYY)'.
+  lv_header_template_check-col14 = 'DATBI(DDMMYY)'.
+  lv_header_template_check-col15 = 'KRECH'.
+  lv_header_template_check-col16 = 'KBETR'.
+  lv_header_template_check-col17 = 'KONWA'.
+  lv_header_template_check-col18 = 'KPEIN'.
+  lv_header_template_check-col19 = 'KMEIN'.
+
+
+  DO 2 TIMES.
+    DELETE lt_file_contents INDEX 1.
+  ENDDO.
+
+
+  IF lv_header_template <> lv_header_template_check.
+
+    MESSAGE 'Wrong template file' TYPE 'I' DISPLAY LIKE 'E' ."TYPE 'E'.
+    LEAVE LIST-PROCESSING.
+
+  ENDIF.
+ENDFORM.
+
+**********************************************************************
+"File Input Validation
+**********************************************************************
+FORM file_inputs_validation .
+    "Key Combination | Column 2 - 6
+*    PERFORM get_key_combination.
+*    lv_key_combination_check = lv_key_combination.
+
+    IF p_995 = 'X'.
+        lv_key_combination = 995.
+    ENDIF.
+    IF p_985 = 'X'.
+        lv_key_combination = 985.
+    ENDIF.
+    IF p_910 = 'X'.
+        lv_key_combination = 910.
+    ENDIF.
+    IF p_911 = 'X'.
+        lv_key_combination = 911.
+    ENDIF.
+    IF p_907 = 'X'.
+        lv_key_combination = 907.
+    ENDIF.
+
+    "Pricing Condition | Column1
+    IF lv_file_contents-col1 <> 'ZPR0'.
+      lv_display-col3_message = 'Pricing Condition must be ZPR0'.
+      PERFORM set_content_status_error.
+    ELSE.
+      lv_pricecondtype = lv_file_contents-col1.
+    ENDIF.
+
+    "Sales Organization Column 7
+    IF lv_file_contents-col7 IS NOT INITIAL.
+      lv_vkorg = lv_file_contents-col7.
+
+      READ TABLE lt_vkorg_check INTO lv_vkorg_check WITH KEY vkorg = lv_vkorg.
+      IF sy-subrc <> 0.
+        lv_display-col3_message = |Sales Org is not allowed|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ELSEIF lv_file_contents-col7 IS INITIAL.
+      lv_display-col3_message = |Sales Org is Mandatory for Key Combination { lv_key_combination }|.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Distribution Channel Column 8
+    IF lv_file_contents-col8 IS NOT INITIAL.
+      lv_vtweg = lv_file_contents-col8.
+
+      READ TABLE lt_vtweg_check INTO lv_vtweg_check WITH KEY vtweg = lv_vtweg.
+      IF sy-subrc <> 0.
+        lv_display-col3_message = |Distribution Channel is not allowed|.
+        PERFORM set_content_status_error.
+      ENDIF.
+
+    ELSEIF lv_file_contents-col8 IS INITIAL.
+      IF lv_key_combination = 995.
+        lv_display-col3_message = |Distribution Channel is Mandatory for Key Combination { lv_key_combination }|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ENDIF.
+
+    "Customer # Column 9
+    CLEAR: lv_kunnr_check.
+    IF lv_file_contents-col9 IS NOT INITIAL.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_file_contents-col9
+        IMPORTING
+          output = lv_kunnr.
+
+      IF lv_key_combination = 985 OR lv_key_combination = 910.
+        READ TABLE lt_kunnr_check INTO lv_kunnr_check WITH KEY kunnr = lv_kunnr.
+        IF lv_kunnr_check IS INITIAL.
+            lv_display-col3_message = |Customer { lv_kunnr } does not exist|.
+            PERFORM set_content_status_error.
+        ENDIF.
+      ENDIF.
+    ELSEIF lv_file_contents-col9 IS INITIAL.
+      IF lv_key_combination = 985 OR lv_key_combination = 910.
+        lv_display-col3_message = |Customer is Mandatory for Key Combination { lv_key_combination }|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ENDIF.
+
+
+    "Ship To Column 10
+    CLEAR: lv_kunnr_check.
+    IF lv_file_contents-col10 IS NOT INITIAL.
+      lv_shipto = lv_file_contents-col10.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_shipto
+        IMPORTING
+          output = lv_shipto.
+      IF lv_key_combination = 985.
+        READ TABLE lt_kunnr_check INTO lv_kunnr_check WITH KEY kunnr = lv_shipto.
+        IF lv_kunnr_check IS INITIAL.
+            lv_display-col3_message = |Ship To { lv_shipto } does not exist|.
+            PERFORM set_content_status_error.
+        ENDIF.
+      ENDIF.
+
+    ELSEIF lv_file_contents-col1 IS INITIAL.
+      IF lv_key_combination = 985.
+        lv_display-col3_message = |Ship To is Mandatory for Key Combination { lv_key_combination }|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ENDIF.
+
+
+    "Price Group Column 11
+    IF lv_file_contents-col11 IS NOT INITIAL.
+
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_file_contents-col11
+        IMPORTING
+          output = lv_konda.
+
+      READ TABLE lt_pricegroup_tbl_check INTO lv_pricegroup_tbl_check WITH KEY konda = lv_konda.
+      IF sy-subrc <> 0.
+        lv_display-col3_message = |Price Group { lv_konda } is not allowed|.
+        PERFORM set_content_status_error.
+
+      ENDIF.
+    ELSEIF lv_file_contents-col11 IS INITIAL.
+      IF lv_key_combination = 911.
+        lv_display-col3_message = |Price Group is Mandatory for Key Combination { lv_key_combination }|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ENDIF.
+
+    "Material   | Column 12
+    CLEAR: lv_matnr_check.
+    IF lv_file_contents-col12 IS NOT INITIAL.
+      lv_matnr = lv_file_contents-col12.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_matnr
+        IMPORTING
+          output = lv_matnr.
+
+        READ TABLE lt_matnr_check INTO lv_matnr_check WITH KEY matnr = lv_matnr.
+        IF lv_matnr_check IS INITIAL.
+            lv_display-col3_message = |Material { lv_matnr } does not exist|.
+            PERFORM set_content_status_error.
+        ENDIF.
+
+    ELSEIF lv_file_contents-col12 IS INITIAL.
+      lv_display-col3_message = 'Material is Mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "valid From | Column 13 | DDMMYYYY
+    IF lv_file_contents-col13 IS NOT INITIAL.
+      IF strlen( lv_file_contents-col13 ) < 8.
+        UNPACK lv_file_contents-col13+0(1) TO lv_date_with_zero.
+        lv_dd = lv_date_with_zero.
+        lv_mm = lv_file_contents-col13+1(3).
+        lv_yyyy = lv_file_contents-col13+3(4).
+        lv_date_rotate_to_datum = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+        lv_validfrom = lv_date_rotate_to_datum.
+        CLEAR: lv_date_rotate_to_datum.
+      ELSEIF strlen( lv_file_contents-col13 ) = 8.
+        lv_dd = lv_file_contents-col13+0(2).
+        lv_mm = lv_file_contents-col13+2(4).
+        lv_yyyy = lv_file_contents-col13+4(4).
+        lv_date_rotate_to_datum = lv_date_rotate_to_datum = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+        lv_validfrom = lv_date_rotate_to_datum.
+        CLEAR: lv_date_rotate_to_datum.
+      ENDIF.
+    ELSEIF lv_file_contents-col13 IS INITIAL.
+      lv_display-col3_message = 'Valid From date is Mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Valid To   | Column 14
+    IF lv_file_contents-col14 IS NOT INITIAL.
+      IF strlen( lv_file_contents-col14 ) < 8.
+        UNPACK lv_file_contents-col14+0(1) TO lv_date_with_zero.
+        lv_dd = lv_date_with_zero.
+        lv_mm = lv_file_contents-col14+1(3).
+        lv_yyyy = lv_file_contents-col14+3(4).
+        lv_date_rotate_to_datum = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+        lv_validto = lv_date_rotate_to_datum.
+        CLEAR: lv_date_rotate_to_datum.
+      ELSEIF strlen( lv_file_contents-col14 ) = 8.
+        lv_dd = lv_file_contents-col14+0(2).
+        lv_mm = lv_file_contents-col14+2(4).
+        lv_yyyy = lv_file_contents-col14+4(4).
+        lv_date_rotate_to_datum = lv_date_rotate_to_datum = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+        lv_validto = lv_date_rotate_to_datum.
+        CLEAR: lv_date_rotate_to_datum.
+      ENDIF.
+    ELSEIF lv_file_contents-col14 IS INITIAL.
+      lv_display-col3_message = 'Valid To date is Mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Date validation valid to > valid from
+    IF sy-subrc = 0. ENDIF. "break
+
+    DATA: lv_datefrom_check TYPE sy-datum,
+          lv_dateto_check TYPE sy-datum,
+          lv_diff TYPE i.
+
+    lv_datefrom_check = lv_validfrom.
+    lv_dateto_check = lv_validto.
+
+    lv_diff = lv_dateto_check - lv_datefrom_check.
+
+    IF lv_diff <= -1.
+      lv_display-col3_message = |Valid To Date { lv_validto } cannot be earlier than the Valid From Date { lv_validfrom } |.
+      PERFORM set_content_status_error.
+
+      CLEAR: lv_diff, lv_datefrom_check, lv_dateto_check.
+    ENDIF.
+
+
+    "Calc Type  | Column 15 .
+    IF lv_file_contents-col15 IS NOT INITIAL.
+      lv_calctype = lv_file_contents-col15.
+    ENDIF.
+
+    "Amount
+    IF lv_file_contents-col16 IS NOT INITIAL.
+
+*      CALL FUNCTION 'NUMERIC_CHECK'
+*        EXPORTING
+*          string_in  = lv_file_contents-col16
+*        IMPORTING
+*          string_out = lv_string_out
+*          htype      = lv_htype
+*        .
+      IF lv_file_contents-col16 CA 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%^&*()_+=-[]{}|\:;"`~<>/?,'.
+          lv_display-col3_message = 'Condition Amount contains non numeric characters'.
+          PERFORM set_content_status_error.
+      ELSE .
+        lv_valuekbetr = lv_file_contents-col16.
+      ENDIF.
+
+    ELSEIF lv_file_contents-col16 IS INITIAL.
+      lv_display-col3_message = 'Condition Amount is Mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Currency  | Column 17
+    IF lv_file_contents-col17 IS NOT INITIAL.
+      lv_currency_konwa = lv_file_contents-col17.
+
+      SELECT SINGLE waers
+          FROM tcurc
+          INTO lv_tcurc_check
+          WHERE waers = lv_currency_konwa.
+      IF sy-subrc <> 0.
+        lv_display-col3_message = |Currency { lv_currency_konwa } is not allowed|.
+        PERFORM set_content_status_error.
+
+      ENDIF.
+    ELSEIF lv_file_contents-col17 IS INITIAL.
+      lv_display-col3_message = 'Currency is mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Per | Column 18
+    IF lv_file_contents-col18 IS NOT INITIAL.
+      lv_file_contents_ctype = lv_file_contents-col18.
+      lv_kpein = lv_file_contents_ctype.
+
+      CLEAR: lv_file_contents_ctype.
+    ELSEIF lv_file_contents-col18 IS INITIAL.
+      lv_display-col3_message = 'Per is mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+
+    "Unit  | Column 19
+    IF lv_file_contents-col19 IS NOT INITIAL.
+      lv_unitkmein = lv_file_contents-col19.
+
+      SELECT SINGLE msehi
+          FROM t006
+          INTO lv_msehi_check
+          WHERE msehi = lv_unitkmein.
+      IF sy-subrc <> 0.
+        lv_display-col3_message = |Unit { lv_unitkmein } is not allowed|.
+        PERFORM set_content_status_error.
+      ENDIF.
+    ELSEIF lv_file_contents-col19 IS INITIAL.
+      lv_display-col3_message = 'Unit is mandatory'.
+      PERFORM set_content_status_error.
+    ENDIF.
+ENDFORM.                    " FILE_INPUTS_VALIDATION
+
+*FORM get_key_combination.
+*  IF lv_file_contents-col2 = 'X'.
+**
+*    lv_key_combination = 907.   "Sales Org./ Material
+*  ENDIF.
+*  IF lv_file_contents-col3 = 'X'.
+**
+*    lv_key_combination = 911.   "Sales Org./Price grp /Material  "988 if need isama
+*  ENDIF.
+*  IF lv_file_contents-col4 = 'X'.
+**
+*    lv_key_combination = 910.   "Sales Org./Customer/Material    "993 if need isama
+*  ENDIF.
+*  IF lv_file_contents-col5 = 'X'.
+**           .
+*    lv_key_combination = 985.   "Sales Org./Customer/Ship To/Material
+*  ENDIF.
+*  IF lv_file_contents-col6 = 'X'.
+**
+*    lv_key_combination = 995.   "Sales Org./Distr. Chl/Material
+*  ENDIF.
+*  IF ( lv_file_contents-col2 IS INITIAL AND
+*           lv_file_contents-col3 IS INITIAL AND
+*               lv_file_contents-col4 IS INITIAL AND
+*                   lv_file_contents-col5 IS INITIAL AND
+*                      lv_file_contents-col6 IS INITIAL ).
+*    lv_key_combination = ''.
+*
+*  ENDIF.
+*
+*  IF lv_key_combination IS INITIAL.
+*    PERFORM set_content_status_error.
+*    lv_display-col3_message = 'No Key Combination Found'.
+*    APPEND lv_display TO lt_display.
+*    CLEAR: lv_display.
+*    lv_iserror = 'X'.
+*  ENDIF.
+*
+*ENDFORM.
+
+**********************************************************************
+"ALV Display Messages,Status,Row Number etc.
+**********************************************************************
+FORM set_content_status_error.
+  lv_display-col1_icon = icon_red_light.
+  lv_display-col2_row = lv_tabix.
+  lv_display-col_cond_tbl = lv_key_combination.
+
+
+  APPEND lv_display TO lt_display.
+  CLEAR: lv_display.
+  lv_haserror = 'X'.
+
+  CLEAR: lv_seterror_duplicate_change,lv_seterror_duplicate_add.
+ENDFORM.
+FORM set_content_status_success.
+  lv_display-col1_icon = icon_green_light.
+  lv_display-col2_row = lv_tabix.
+  lv_display-col_cond_tbl = lv_key_combination.
+  LOOP AT lt_bapiknumhs INTO lv_bapiknumhs.
+*    lv_display-col3_message = |Upload Success: { lv_bapiknumhs-cond_no_new }|.
+*    IF ( lv_bapiknumhs-cond_no_old = lv_bapiknumhs-cond_no_new ) AND lv_bapiknumhs-cond_no_old <> '$000000001' .
+*      lv_display-col3_message = |Modification Success: { lv_bapiknumhs-cond_no_new }|.
+*    ENDIF.
+    IF lv_knumh_saved IS NOT INITIAL.
+      lv_display-col3_message = |Upload Success: { lv_knumh_saved }|.
+    ENDIF.
+    IF lv_bapiret2-message_v3 = 'U'.
+      lv_display-col3_message = |Update Success: { lv_bapiknumhs-cond_no_new }|.
+    ENDIF.
+    IF lv_bapiret2-message_v3 = 'D'.
+      lv_display-col3_message = |Delete Success: { lv_bapiknumhs-cond_no_new }|.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.
+FORM set_content_status_yellow.
+  lv_display-col1_icon = icon_yellow_light.
+  lv_display-col2_row = lv_tabix.
+  lv_display-col_cond_tbl = lv_key_combination.
+
+
+  APPEND lv_display TO lt_display.
+  CLEAR: lv_display.
+
+
+  CLEAR: lv_seterror_duplicate_change,lv_seterror_duplicate_add.
+ENDFORM.
+
+**********************************************************************
+"Display
+**********************************************************************
+FORM display.
+  IF lt_display IS NOT INITIAL.
+
+    CALL METHOD cl_salv_table=>factory
+      EXPORTING
+        list_display   = if_salv_c_bool_sap=>true    " ALV Displayed in List Mode
+*       r_container    =     " Abstract Container for GUI Controls
+*       container_name =
+      IMPORTING
+        r_salv_table   = lo_salv
+      CHANGING
+        t_table        = lt_display.
+
+    lo_columns = lo_salv->get_columns( ).
+    lo_column = lo_columns->get_column( 'COL1_ICON' ).
+    lo_column->set_short_text( 'Status' ).
+    lo_column->set_medium_text( 'Status' ).
+    lo_column->set_long_text( 'Status' ).
+
+    lo_column = lo_columns->get_column( 'COL2_ROW' ).
+    lo_column->set_short_text( 'Row' ).
+    lo_column->set_medium_text( 'Row' ).
+    lo_column->set_long_text( 'Row' ).
+
+    lo_column = lo_columns->get_column( 'COL_COND_TBL' ).
+    lo_column->set_short_text( 'Cond No.' ).
+    lo_column->set_medium_text( 'Conditon No.' ).
+    lo_column->set_long_text( 'Condition No.' ).
+
+
+    lo_column = lo_columns->get_column( 'COL3_MESSAGE' ).
+    lo_column->set_short_text( 'Details' ).
+    lo_column->set_medium_text( 'Details' ).
+    lo_column->set_long_text( 'Details' ).
+
+    lo_columns->set_optimize(  ).
+    lo_salv->display(  ).
+  ELSE.
+*    IF p_test = 'X'.
+*        MESSAGE 'No Errors Found' TYPE 'S'.
+*    ELSE.
+        MESSAGE 'Upload successful without errors' TYPE 'S'.
+*    ENDIF.
+  ENDIF.
+ENDFORM.
