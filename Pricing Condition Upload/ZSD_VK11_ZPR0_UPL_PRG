@@ -1,0 +1,1498 @@
+*$*$*****************************************************CATALOG_START**
+*$*$ PROGRAM ID      : ZSD_VK11_ZPR0_UPL                               *
+*$*$ TITLE           :                                                 *
+*$*$ CREATION START DATE   : September 4, 2023                         *
+*$*$ AUTHOR          : abolival                                        *
+*$*$ REFERENCE ID    :                                                 *
+*$*$ DESCRIPTION     : Upload program for VK11 using                   *
+*$*$                   BAPI_PRICES_CONDITION                           *
+*$*$                                                                   *
+*$*$********************************************************************
+*$*$ 1. TCODE: VK+C - Check Axxx, KONH,KONP                            *
+*$*$ 2. TCODE: VK11 - Create                                           *
+*$*$ 3. TCODE: VK13 - Display                                          *TMC1
+*$*$ 4. Table: TMC1 - List of Key Combination                          *
+*$*$********************************************************************
+*$*$    CHANGE HISTORY                                                 *
+*----------------------------------------------------------------------*
+*$*$ CODE MARKER     : aboloval                                         *
+*$*$ REFERENCE ID    : C-003462                                                *
+*$*$ DESCRIPTION     : Initial Develop,ent                                                *
+*$*$                                                                   *
+*----------------------------------------------------------------------*
+*$*$ CODE MARKER     : aboloval
+*$*$ REFERENCE ID    : I-003722
+*$*$ DESCRIPTION     : Force ZPR0 in KONP condition type table
+*$*$                 : some KONP-KSCHL in CCQ has empty ZPR0
+*$*$ Date            : 3/13/2024
+*$*$*******************************************************CATALOG_END**
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& Report  ZSD_VK11_ZPR0_UPL
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+
+REPORT zsd_vk11_zpr0_upl_prg.
+
+INCLUDE zsd_vk11_zpr0_upl_top.
+INCLUDE zsd_vk11_zpr0_upl_sel.
+INCLUDE zsd_vk11_zpr0_upl_inc.
+
+
+AT SELECTION-SCREEN ON  VALUE-REQUEST FOR p_path.
+
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+      window_title            = 'Open File'
+    CHANGING
+      file_table              = lt_filetable
+      rc                      = lv_rc
+    EXCEPTIONS
+      file_open_dialog_failed = 1
+      cntl_error              = 2
+      error_no_gui            = 3
+      not_supported_by_gui    = 4
+      OTHERS                  = 5.
+
+  READ TABLE lt_filetable INTO lv_filetable INDEX 1.
+  IF sy-subrc = 0.
+    p_path = lv_filetable-filename.
+  ENDIF.
+
+
+
+AT SELECTION-SCREEN.
+
+  lv_path_c = p_path.
+  CALL FUNCTION 'TRINT_FILE_GET_EXTENSION'
+    EXPORTING
+      filename  = lv_path_c
+      uppercase = 'X'
+    IMPORTING
+      extension = lv_path_extension.
+
+  IF ( lv_path_extension NE 'XLS' AND lv_path_extension NE 'XLSX' ). "( lv_path_extension NE 'CSV' AND lv_path_extension NE 'XLSX' ).
+    lv_error_message = | File Type { lv_path_extension } are not allowed please use XLSX or XLS file type.|.
+    MESSAGE lv_error_message TYPE 'E'.
+  ENDIF.
+
+
+START-OF-SELECTION.
+
+  lv_filename = p_path.
+
+
+  PERFORM upload_file.
+
+  PERFORM file_columns.
+
+  "Get All KUNNR and Material
+  LOOP AT lt_file_contents INTO lv_file_contents.
+   CONDENSE: lv_file_contents-col9,
+             lv_file_contents-col10,
+             lv_file_contents-col12
+             NO-GAPS.
+
+    IF lv_file_contents-col9 IS NOT INITIAL. "Customer
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_file_contents-col9
+        IMPORTING
+          output = lv_kunnr.
+
+      APPEND lv_kunnr TO lt_kunnr_check_temp.
+    ENDIF.
+    IF lv_file_contents-col10 IS NOT INITIAL. "Ship to
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_file_contents-col10
+        IMPORTING
+          output = lv_shipto.
+
+      APPEND lv_shipto TO lt_kunnr_check_temp.
+    ENDIF.
+    IF lv_file_contents-col12 IS NOT INITIAL. "Material
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_file_contents-col12
+        IMPORTING
+          output = lv_matnr.
+    ENDIF.
+      APPEND lv_matnr TO lt_matnr_check_temp.
+
+    CLEAR: lv_file_contents, lv_kunnr, lv_shipto, lv_matnr.
+  ENDLOOP.
+
+  DELETE ADJACENT DUPLICATES FROM lt_kunnr_check_temp COMPARING kunnr.
+  DELETE ADJACENT DUPLICATES FROM lt_matnr_check_temp COMPARING matnr.
+
+  SELECT kunnr FROM kna1
+    INTO TABLE lt_kunnr_check
+    FOR ALL ENTRIES IN lt_kunnr_check_temp
+    WHERE kunnr = lt_kunnr_check_temp-kunnr.
+
+  SELECT matnr FROM mara
+    INTO TABLE lt_matnr_check
+    FOR ALL ENTRIES IN lt_matnr_check_temp
+    WHERE matnr = lt_matnr_check_temp-matnr.
+  """""""
+
+  "For validation
+  SELECT * FROM t188 "CCP contains 12 records only
+    INTO CORRESPONDING FIELDS OF TABLE lt_pricegroup_tbl_check.
+
+  SELECT * FROM tvko "CCP contains 2 records only
+    INTO CORRESPONDING FIELDS OF TABLE lt_vkorg_check.
+
+  SELECT * FROM tvtw
+    INTO CORRESPONDING FIELDS OF TABLE lt_vtweg_check.
+
+
+  lv_count = 1.
+
+  LOOP AT lt_file_contents INTO lv_file_contents.
+    lv_tabix = sy-tabix.
+
+
+    PERFORM file_inputs_validation.
+
+    """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+    "BAPI
+    """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+    CHECK lv_haserror <> 'X'.
+
+    "checking If dates in file is overlapped then delete/modify
+    IF lv_key_combination = 995.
+      lv_finalvarkey_ct = |{ lv_vkorg }{ lv_vtweg }{ lv_matnr }|.
+      lv_finalvarkey_hd = |{ lv_vkorg }{ lv_vtweg }{ lv_matnr }|.
+
+      IF lv_pricecondtype = 'ZPR0' AND
+         lv_vkorg IS NOT INITIAL   AND
+         lv_vtweg IS NOT INITIAL   AND
+         lv_matnr IS NOT INITIAL   AND
+         lv_validto IS NOT INITIAL
+         .
+        PERFORM overlap_check_axxx.
+
+      ENDIF.
+    ENDIF.
+    IF lv_key_combination = 985.
+      lv_finalvarkey_ct = |{ lv_vkorg }{ lv_kunnr }{ lv_shipto }{ lv_matnr }|.
+      lv_finalvarkey_hd = |{ lv_vkorg }{ lv_kunnr }{ lv_shipto }{ lv_matnr }|.
+
+      IF lv_pricecondtype = 'ZPR0' AND
+         lv_vkorg IS NOT INITIAL   AND
+         lv_kunnr IS NOT INITIAL   AND
+         lv_shipto IS NOT INITIAL  AND
+         lv_matnr IS NOT INITIAL   AND
+         lv_validto IS NOT INITIAL
+         .
+
+         PERFORM overlap_check_axxx.
+
+      ENDIF.
+    ENDIF.
+    IF lv_key_combination = 910.
+      lv_finalvarkey_ct = |{ lv_vkorg }{ lv_kunnr }{ lv_matnr }|.
+      lv_finalvarkey_hd = |{ lv_vkorg }{ lv_kunnr }{ lv_matnr }|.
+
+      IF lv_pricecondtype = 'ZPR0' AND
+         lv_vkorg IS NOT INITIAL   AND
+         lv_kunnr IS NOT INITIAL   AND
+         lv_matnr IS NOT INITIAL   AND
+         lv_validto IS NOT INITIAL
+         .
+         PERFORM overlap_check_axxx.
+      ENDIF.
+
+    ENDIF.
+    IF lv_key_combination = 911.
+      lv_finalvarkey_ct = |{ lv_vkorg }{ lv_konda }{ lv_matnr }|.
+      lv_finalvarkey_hd = |{ lv_vkorg }{ lv_konda }{ lv_matnr }|.
+
+      IF lv_pricecondtype = 'ZPR0' AND
+         lv_vkorg IS NOT INITIAL   AND
+         lv_konda IS NOT INITIAL   AND
+         lv_matnr IS NOT INITIAL   AND
+         lv_validto IS NOT INITIAL.
+
+         PERFORM overlap_check_axxx.
+
+      ENDIF.
+
+    ENDIF.
+    IF lv_key_combination = 907.
+      lv_finalvarkey_ct = |{ lv_vkorg }{ lv_matnr }|.
+      lv_finalvarkey_hd = |{ lv_vkorg }{ lv_matnr }|.
+
+      IF lv_pricecondtype = 'ZPR0' AND
+         lv_vkorg IS NOT INITIAL   AND
+         lv_matnr IS NOT INITIAL   AND
+         lv_validto IS NOT INITIAL.
+
+         PERFORM overlap_check_axxx.
+
+      ENDIF.
+    ENDIF.
+
+    IF lv_haserror = 'X'.
+      EXIT.
+    ENDIF.
+    "Create
+
+    CLEAR: lt_bapicondct[] , lt_bapicondhd[], lt_bapicondit[],lt_bapiknumhs[],lt_bapiret2[].
+    CLEAR: lv_bapicondct   , lv_bapicondhd  , lv_bapicondit  ,lv_bapiknumhs  ,lv_bapiret2.
+
+    lv_operation = '009'.
+    lv_knumh = '$000000001'.
+    lv_bapicondct-operation    = lv_operation.
+    lv_bapicondct-cond_no      = lv_knumh.
+    lv_bapicondct-cond_usage   = 'A'.
+    lv_bapicondct-cond_type    = lv_pricecondtype.
+    lv_bapicondct-table_no     = lv_key_combination.
+    lv_bapicondct-applicatio   = 'V'.
+    lv_bapicondct-varkey       = lv_finalvarkey_ct.
+    lv_bapicondct-valid_to     = lv_validto.
+    lv_bapicondct-valid_from   = lv_validfrom.
+    APPEND lv_bapicondct TO lt_bapicondct.
+
+    lv_bapicondhd-operation    = lv_operation.
+    lv_bapicondhd-cond_no      = lv_knumh.
+    lv_bapicondhd-created_by   = sy-uname.
+    lv_bapicondhd-creat_date   = sy-datum.
+    lv_bapicondhd-cond_usage   = 'A'.
+    lv_bapicondhd-table_no     = lv_key_combination.
+    lv_bapicondhd-applicatio   = 'V'.
+    lv_bapicondhd-cond_type    = lv_pricecondtype.
+    lv_bapicondhd-varkey       = lv_finalvarkey_ct.
+    lv_bapicondhd-valid_to     = lv_validto.
+    lv_bapicondhd-valid_from   = lv_validfrom.
+    APPEND lv_bapicondhd TO lt_bapicondhd.
+
+    lv_bapicondit-operation    = lv_operation.
+    lv_bapicondit-cond_no      = lv_knumh.
+    lv_bapicondit-cond_count   = lv_count.
+    lv_bapicondit-cond_type    = lv_pricecondtype. "+dxcsupport1 abolival I-003722 ,  DD/MM/YYYY = 13.03.2024
+    lv_bapicondit-applicatio   = 'V'.
+    lv_bapicondit-customer    = lv_kunnr.
+    lv_bapicondit-calctypcon  = lv_calctype.
+    lv_bapicondit-cond_value  = lv_valuekbetr.
+    lv_bapicondit-condcurr    = lv_currency_konwa.
+    lv_bapicondit-cond_p_unt  = lv_kpein.
+    lv_bapicondit-cond_unit   = lv_unitkmein.
+    lv_bapicondit-status      = lv_kfrst.
+*    lv_bapicondit-indidelete  = lv_delete_indicator.
+    APPEND lv_bapicondit TO lt_bapicondit.
+
+    REFRESH: db_xkondat[], db_ykondat[], db_xkonh[], db_xkonm[], db_xkonp[], db_xkonw[], db_ykonh[],
+             db_ykonm[],   db_ykonp[], db_ykonw[].
+
+    PERFORM bapi_prices_condtion.
+
+    IF p_test IS INITIAL AND lv_haserror IS INITIAL.
+      CLEAR: lv_knumh_saved.
+      LOOP AT lt_bapiret2 ASSIGNING <fs_bapiret2> WHERE type = 'S'.
+        lv_knumh_saved = <fs_bapiret2>-message_v1.
+        PERFORM set_content_status_success.
+        APPEND lv_display TO lt_display.
+        EXIT.
+      ENDLOOP.
+
+      CLEAR: db_ykonp, lv_db_ykonp.
+      APPEND lv_db_ykonp TO db_ykonp.
+      LOOP AT db_ykonp ASSIGNING <fs_dbykonp>.
+        <fs_dbykonp>-knumh = lv_knumh_saved.
+      ENDLOOP.
+
+      SELECT * FROM konh
+        APPENDING CORRESPONDING FIELDS OF TABLE db_xkonh
+        WHERE knumh = lv_knumh_saved.
+      LOOP AT db_xkonh ASSIGNING <fs_dbxkonh>.
+        <fs_dbxkonh>-updkz = 'I'.
+      ENDLOOP.
+
+      SELECT * FROM konp
+        APPENDING CORRESPONDING FIELDS OF TABLE db_xkonp
+        WHERE knumh = lv_knumh_saved.
+      LOOP AT db_xkonp ASSIGNING <fs_dbxkonp>.
+        <fs_dbxkonp>-updkz = 'I'.
+      "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+      IF <fs_dbxkonp>-kschl IS INITIAL.
+        <fs_dbxkonp>-kschl = lv_file_contents-col1.
+      ENDIF.
+      "+++END
+      ENDLOOP.
+
+      LOOP AT db_ykonp ASSIGNING <fs_dbykonp>.
+        READ TABLE db_xkonp ASSIGNING <fs_dbxkonp> WITH KEY knumh = <fs_dbykonp>-knumh.
+        IF sy-subrc = 0.
+          <fs_dbykonp>-mandt      =   <fs_dbxkonp>-mandt.
+          <fs_dbykonp>-knumh      =   <fs_dbxkonp>-knumh.
+          <fs_dbykonp>-kopos      =   <fs_dbxkonp>-kopos.
+          <fs_dbykonp>-kappl      =   <fs_dbxkonp>-kappl.
+          <fs_dbykonp>-kschl      =   <fs_dbxkonp>-kschl.
+          <fs_dbykonp>-stfkz      =   <fs_dbxkonp>-stfkz.
+          <fs_dbykonp>-krech      =   <fs_dbxkonp>-krech.
+          <fs_dbykonp>-kwaeh      =   <fs_dbxkonp>-kwaeh.
+          <fs_dbykonp>-zaehk_ind  =   <fs_dbxkonp>-zaehk_ind.
+          <fs_dbykonp>-rv13abkonw =   <fs_dbxkonp>-rv13abkonw.
+          <fs_dbykonp>-rv13akonwa =   <fs_dbxkonp>-rv13akonwa.
+          <fs_dbykonp>-updkz      =   <fs_dbxkonp>-updkz.
+        ENDIF.
+
+      ENDLOOP.
+
+      IF db_xkondat[] IS INITIAL.
+        LOOP AT db_xkonh INTO lv_db_xkonh.
+          lv_db_xkondat-knumh = lv_db_xkonh-knumh.
+          lv_db_xkondat-datan = lv_bapicondhd-valid_from.
+          READ TABLE db_ykonh INTO lv_db_ykonh WITH KEY knumh = lv_db_xkonh-knumh.
+          IF sy-subrc = 0.
+            lv_db_xkondat-datab = lv_db_ykonh-datab.
+            lv_db_xkondat-datbi = lv_db_ykonh-datbi.
+            lv_db_xkondat-kz    = 'U' .
+            APPEND lv_db_xkondat TO db_xkondat.
+          ELSE.
+            lv_db_xkondat-datab = lv_db_xkonh-datab.
+            lv_db_xkondat-datbi = lv_db_xkonh-datbi.
+            lv_db_xkondat-kz    = 'U'.
+            APPEND lv_db_xkondat TO db_xkondat.
+          ENDIF.
+        ENDLOOP.
+        CLEAR: lv_db_xkondat, lv_db_xkonh.
+      ENDIF.
+
+      IF db_ykondat[] IS INITIAL.
+        db_ykondat[] = db_xkondat[].
+        LOOP AT db_ykondat ASSIGNING <fs_dbykondat> .
+          CLEAR: <fs_dbykondat>-datab, <fs_dbykondat>-datbi.
+        ENDLOOP.
+      ENDIF.
+
+      PERFORM bapi_sd_condition_change.
+
+      IF p_test IS INITIAL AND lv_haserror IS INITIAL.
+        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+          EXPORTING
+            wait = 'X'.
+      ENDIF.
+
+
+    ENDIF.
+
+    CLEAR:  lv_pricecondtype, lv_vkorg,   lv_vtweg,    lv_kunnr,      lv_shipto,        lv_konda, lv_matnr,
+            lv_validfrom,     lv_validto, lv_calctype, lv_valuekbetr, lv_currency_konwa,lv_kpein, lv_unitkmein,
+            lv_knumh,         lv_operation, lv_delete_indicator,
+            lv_finalvarkey_ct,lv_finalvarkey_hd.
+  ENDLOOP.
+
+
+
+END-OF-SELECTION.
+
+  PERFORM display.
+
+  """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  "FORMS/Subroutine
+  """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+FORM overlap_check_axxx.
+  CLEAR: lv_hasoverlap.
+  IF lv_haserror = 'X'.
+    EXIT.
+  ENDIF.
+
+  PERFORM f_read_axxx_1.
+
+  PERFORM modify_overlap.
+
+  IF lt_axxx_final IS NOT INITIAL.
+    lv_hasoverlap = 'X'.
+  ENDIF.
+  """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  "start of change dxcsupport1 abolival C-003462, DD/MM/YYYY =  -13/11/2023,
+
+  IF lv_haserror = 'X'.
+    EXIT.
+  ENDIF.
+
+  PERFORM f_read_axxx_4.
+  lv_modif_and_add = 'X'.
+  PERFORM modify_overlap2.
+  CLEAR: lv_modif_and_add.
+
+  IF lt_axxx_final IS NOT INITIAL.
+    lv_hasoverlap = 'X'.
+  ENDIF.
+  "end of change
+
+  """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  IF lv_haserror = 'X'.
+    EXIT.
+  ENDIF.
+
+  PERFORM f_read_axxx_2.
+
+  IF sy-subrc = 0.
+    lv_gele_check = 'X'.
+  ENDIF.
+
+  PERFORM modify_overlap.
+
+  IF lt_axxx_final IS NOT INITIAL.
+    lv_hasoverlap = 'X'.
+  ENDIF.
+
+  """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  IF lv_haserror = 'X'.
+    EXIT.
+  ENDIF.
+
+  PERFORM f_read_axxx_3.
+
+  PERFORM modify_overlap2.
+
+  IF lt_axxx_final IS NOT INITIAL.
+    lv_hasoverlap = 'X'.
+  ENDIF.
+
+  IF p_test = 'X' AND lv_hasoverlap = 'X'.
+    lv_display-col3_message = 'Record already exist / Date is overlapped'.
+    PERFORM set_content_status_yellow.
+  ENDIF.
+
+  """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+
+ENDFORM.
+
+
+
+
+FORM modify_overlap.
+
+  LOOP AT lt_axxx_final ASSIGNING <fs_axxx_final>.
+    CLEAR: lt_bapicondct[] , lt_bapicondhd[], lt_bapicondit[],lt_bapiknumhs[],lt_bapiret2[].
+    CLEAR: lv_bapicondct   , lv_bapicondhd  , lv_bapicondit  ,lv_bapiknumhs  ,lv_bapiret2.
+
+    PERFORM populate_bapi_003.
+
+    PERFORM get_konh_konp_before_bapi.
+
+    PERFORM bapi_prices_condtion.
+
+    PERFORM get_konh_konp_after_bapi.
+
+    PERFORM bapi_sd_condition_change.
+
+
+    CLEAR: lv_key_combination_check.
+
+    CLEAR: lt_bapicondct[] , lt_bapicondhd[], lt_bapicondit[],lt_bapiknumhs[],lt_bapiret2[].
+    CLEAR: lv_bapicondct   , lv_bapicondhd  , lv_bapicondit  ,lv_bapiknumhs  ,lv_bapiret2.
+
+
+    IF lv_gele_check <> 'X'.
+
+      PERFORM populate_bapi_004_1.
+
+      PERFORM get_konh_konp_before_bapi.
+
+      PERFORM bapi_prices_condtion.
+
+      PERFORM get_konh_konp_after_bapi.
+
+      PERFORM bapi_sd_condition_change.
+
+    ENDIF.
+
+    CLEAR: lv_gele_check.
+
+  ENDLOOP.
+ENDFORM.
+
+FORM modify_overlap2.
+  LOOP AT lt_axxx_final ASSIGNING <fs_axxx_final>.
+    CLEAR: lt_bapicondct[] , lt_bapicondhd[], lt_bapicondit[],lt_bapiknumhs[],lt_bapiret2[].
+    CLEAR: lv_bapicondct   , lv_bapicondhd  , lv_bapicondit  ,lv_bapiknumhs  ,lv_bapiret2.
+
+    PERFORM populate_bapi_004_2.
+
+    PERFORM get_konh_konp_before_bapi.
+
+    PERFORM bapi_prices_condtion.
+
+    PERFORM get_konh_konp_after_bapi.
+
+    PERFORM bapi_sd_condition_change.
+
+
+    "start of change dxcsupport1 abolival C-003462, DD/MM/YYYY = -13.11.2023
+    IF lv_modif_and_add = 'X'.
+
+      PERFORM populate_bapi_009_1.
+
+      PERFORM get_konh_konp_before_bapi.
+
+      PERFORM bapi_prices_condtion.
+
+      PERFORM get_konh_konp_after_bapi.
+
+      PERFORM bapi_sd_condition_change.
+
+    ENDIF.
+
+    CLEAR: lv_modif_and_add.
+    "end of change
+    CLEAR: lv_key_combination_check.
+
+  ENDLOOP.
+ENDFORM.
+
+FORM populate_bapi_003.
+  lv_operation = '003'.
+  lv_bapicondct-operation    = lv_operation.
+  lv_bapicondct-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondct-cond_usage   = 'A'.   "A = Pricing Condition
+  lv_bapicondct-cond_type    = lv_pricecondtype. "ZPR0
+  lv_bapicondct-table_no     = lv_key_combination.
+  lv_bapicondct-applicatio   = 'V'. "V = Sales/Distribution
+  lv_bapicondct-varkey       = lv_finalvarkey_ct.
+  lv_bapicondct-valid_to     = <fs_axxx_final>-datbi.
+  lv_bapicondct-valid_from   = <fs_axxx_final>-datab.
+  APPEND lv_bapicondct TO lt_bapicondct.
+
+  lv_bapicondhd-operation    = lv_operation.
+  lv_bapicondhd-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondhd-created_by   = sy-uname.
+  lv_bapicondhd-creat_date   = sy-datum.
+  lv_bapicondhd-cond_usage   = 'A'.
+  lv_bapicondhd-table_no     = lv_key_combination.
+  lv_bapicondhd-applicatio   = 'V'.
+  lv_bapicondhd-cond_type    = lv_pricecondtype.
+  lv_bapicondhd-varkey       = lv_finalvarkey_ct.
+  lv_bapicondhd-valid_to     = <fs_axxx_final>-datbi.
+  lv_bapicondhd-valid_from   = <fs_axxx_final>-datab.
+  APPEND lv_bapicondhd TO lt_bapicondhd.
+
+  lv_bapicondit-operation    = lv_operation.
+  lv_bapicondit-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondit-cond_count   = lv_count.
+  lv_bapicondit-applicatio   = 'V'.
+  lv_bapicondit-customer    = lv_kunnr.
+  lv_bapicondit-calctypcon  = lv_calctype.
+  lv_bapicondit-cond_value  = <fs_axxx_final>-kbetr.
+  lv_bapicondit-condcurr    = <fs_axxx_final>-konwa.
+  lv_bapicondit-cond_p_unt  = <fs_axxx_final>-kpein.
+  lv_bapicondit-cond_unit   = <fs_axxx_final>-kmein.
+  lv_bapicondit-status      = <fs_axxx_final>-kfrst.
+  lv_bapicondit-cond_type    = lv_pricecondtype. "+dxcsupport1 abolival I-003722 ,  DD/MM/YYYY = 13.03.2024
+  APPEND lv_bapicondit TO lt_bapicondit.
+ENDFORM.
+FORM populate_bapi_004_1.
+  lv_operation = '004'. "Change
+  lv_bapicondct-operation    = lv_operation.
+*    CLEAR: lv_knumh.
+*    lv_knumh = lv_bapicondct-cond_no.
+  lv_bapicondct-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondct-cond_usage   = 'A'.   "A = Pricing Condition
+  lv_bapicondct-cond_type    = lv_pricecondtype. "ZPR0
+  lv_bapicondct-table_no     = lv_key_combination.
+  lv_bapicondct-applicatio   = 'V'. "V = Sales/Distribution
+  lv_bapicondct-varkey       = lv_finalvarkey_ct.
+  lv_bapicondct-valid_to     = lv_validfrom - 1.
+  lv_bapicondct-valid_from   = <fs_axxx_final>-datab.
+  APPEND lv_bapicondct TO lt_bapicondct.
+
+  lv_bapicondhd-operation    = lv_bapicondct-operation.
+  lv_bapicondhd-cond_no      = lv_bapicondct-cond_no.
+  lv_bapicondhd-created_by   = sy-uname.
+  lv_bapicondhd-creat_date   = sy-datum.
+  lv_bapicondhd-cond_usage   = 'A'.
+  lv_bapicondhd-table_no     = lv_key_combination.
+  lv_bapicondhd-applicatio   = 'V'.
+  lv_bapicondhd-cond_type    = lv_pricecondtype.
+  lv_bapicondhd-varkey       = lv_finalvarkey_ct.
+  lv_bapicondhd-valid_to     = <fs_axxx_final>-datbi.
+  lv_bapicondhd-valid_from   = lv_validfrom - 1.
+  APPEND lv_bapicondhd TO lt_bapicondhd.
+
+  lv_bapicondit-operation    = lv_bapicondct-operation.
+  lv_bapicondit-cond_no      = lv_bapicondct-cond_no.
+  lv_bapicondit-cond_count   = lv_count.
+  lv_bapicondit-applicatio   = 'V'.
+  lv_bapicondit-customer    = lv_kunnr.
+  lv_bapicondit-calctypcon  = lv_calctype.
+  lv_bapicondit-cond_value  = <fs_axxx_final>-kbetr.
+  lv_bapicondit-condcurr    = <fs_axxx_final>-konwa.
+  lv_bapicondit-cond_p_unt  = <fs_axxx_final>-kpein.
+  lv_bapicondit-cond_unit   = <fs_axxx_final>-kmein.
+  lv_bapicondit-status      = <fs_axxx_final>-kfrst.
+  lv_bapicondit-indidelete  = <fs_axxx_final>-loevm_ko.
+  lv_delete_indicator       = lv_bapicondit-indidelete. "lv_delete_indicator will be use in 009(Creation)
+  lv_bapicondit-cond_type    = lv_pricecondtype. "+dxcsupport1 abolival I-003722 ,  DD/MM/YYYY = 13.03.2024
+  APPEND lv_bapicondit TO lt_bapicondit.
+ENDFORM.
+FORM populate_bapi_004_2.
+  lv_operation = '004'.
+  lv_bapicondct-operation    = lv_operation.
+  lv_bapicondct-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondct-cond_usage   = 'A'.
+  lv_bapicondct-cond_type    = lv_pricecondtype.
+  lv_bapicondct-table_no     = lv_key_combination.
+  lv_bapicondct-applicatio   = 'V'.
+  lv_bapicondct-varkey       = lv_finalvarkey_ct.
+  lv_bapicondct-valid_to     = <fs_axxx_final>-datbi.
+  lv_bapicondct-valid_from   = lv_validto + 1.
+  APPEND lv_bapicondct TO lt_bapicondct.
+
+  lv_bapicondhd-operation    = lv_operation.
+  lv_bapicondhd-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondhd-created_by   = sy-uname.
+  lv_bapicondhd-creat_date   = sy-datum.
+  lv_bapicondhd-cond_usage   = 'A'.
+  lv_bapicondhd-table_no     = lv_key_combination.
+  lv_bapicondhd-applicatio   = 'V'.
+  lv_bapicondhd-cond_type    = lv_pricecondtype.
+  lv_bapicondhd-varkey       = lv_finalvarkey_ct.
+  lv_bapicondhd-valid_to     = <fs_axxx_final>-datbi.
+  lv_bapicondhd-valid_from   = lv_validto + 1.
+  "start of change dxcsupport1 abolival ticket, DD/MM/YYYY = -14.11.2023 11:14:21 ,
+  IF lv_modif_and_add = 'X'.
+   lv_bapicondhd-valid_from = <fs_axxx_final>-datab.
+  ENDIF.
+  "end of change
+  APPEND lv_bapicondhd TO lt_bapicondhd.
+
+  lv_bapicondit-operation    = lv_operation.
+  lv_bapicondit-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondit-cond_count   = lv_count.
+  lv_bapicondit-applicatio   = 'V'.
+  lv_bapicondit-customer    = lv_kunnr.
+  lv_bapicondit-calctypcon  = lv_calctype.
+  lv_bapicondit-cond_value  = <fs_axxx_final>-kbetr.
+  lv_bapicondit-condcurr    = <fs_axxx_final>-konwa.
+  lv_bapicondit-cond_p_unt  = <fs_axxx_final>-kpein.
+  lv_bapicondit-cond_unit   = <fs_axxx_final>-kmein.
+  lv_bapicondit-status      = <fs_axxx_final>-kfrst.
+  lv_bapicondit-indidelete  = <fs_axxx_final>-loevm_ko.
+  lv_delete_indicator       = lv_bapicondit-indidelete. "lv_delete_indicator will be use in 009(Creation)
+  lv_bapicondit-cond_type    = lv_pricecondtype. "+dxcsupport1 abolival I-003722 ,  DD/MM/YYYY = 13.03.2024
+  APPEND lv_bapicondit TO lt_bapicondit.
+ENDFORM.
+FORM get_konh_konp_before_bapi.
+  REFRESH: db_xkondat[], db_ykondat[], db_xkonh[], db_xkonm[], db_xkonp[], db_xkonw[], db_ykonh[],
+           db_ykonm[],   db_ykonp[], db_ykonw[].
+  CLEAR:   lv_db_xkondat, lv_db_ykondat, lv_db_xkonh, lv_db_xkonm, lv_db_xkonp, lv_db_xkonw, lv_db_ykonh,
+           lv_db_ykonm,   lv_db_ykonp, lv_db_ykonw.
+
+  SELECT * FROM konh
+      APPENDING CORRESPONDING FIELDS OF TABLE db_ykonh
+      WHERE knumh = <fs_axxx_final>-knumh.
+  LOOP AT db_ykonh ASSIGNING <fs_dbykonh>.
+    <fs_dbykonh>-updkz = 'U'.
+  ENDLOOP.
+
+  SELECT * FROM konp
+      APPENDING CORRESPONDING FIELDS OF TABLE db_ykonp
+      WHERE knumh = <fs_axxx_final>-knumh.
+  LOOP AT db_ykonp ASSIGNING <fs_dbykonp>.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF <fs_dbykonp>-kschl IS INITIAL.
+      <fs_dbykonp>-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    <fs_dbykonp>-updkz = 'U'.
+  ENDLOOP.
+ENDFORM.
+FORM bapi_prices_condtion.
+  CLEAR: lv_del.
+  IF p_test IS INITIAL AND lv_haserror IS INITIAL.
+
+    IF lv_bapicondct-operation = '003'.
+      lv_del = 'X'.
+    ELSE.
+      CLEAR: lv_del.
+    ENDIF.
+
+    CALL FUNCTION 'BAPI_PRICES_CONDITIONS'
+      EXPORTING
+        pi_physical_deletion = lv_del
+      TABLES
+        ti_bapicondct        = lt_bapicondct
+        ti_bapicondhd        = lt_bapicondhd
+        ti_bapicondit        = lt_bapicondit
+        ti_bapicondqs        = lt_bapicondqs
+        ti_bapicondvs        = lt_bapicondvs
+        to_bapiret2          = lt_bapiret2
+        to_bapiknumhs        = lt_bapiknumhs
+        to_mem_initial       = lt_cnd_mem_initial
+      EXCEPTIONS
+        update_error         = 1
+        OTHERS               = 2.
+
+  ENDIF.
+ENDFORM.
+FORM get_konh_konp_after_bapi.
+  REFRESH: db_xkondat[], db_ykondat[], db_xkonh[], db_xkonm[], db_xkonp[], db_xkonw[], db_ykonh[],
+           db_ykonm[],   db_ykonp[], db_ykonw[].
+  CLEAR:   lv_db_xkondat, lv_db_ykondat, lv_db_xkonh, lv_db_xkonm, lv_db_xkonp, lv_db_xkonw, lv_db_ykonh,
+           lv_db_ykonm,   lv_db_ykonp, lv_db_ykonw.
+
+  SELECT * FROM konh
+     APPENDING CORRESPONDING FIELDS OF TABLE db_xkonh
+     WHERE knumh = <fs_axxx_final>-knumh.
+  LOOP AT db_xkonh ASSIGNING <fs_dbxkonh>.
+    <fs_dbxkonh>-updkz = 'U'.
+  ENDLOOP.
+
+  SELECT * FROM konp
+     APPENDING CORRESPONDING FIELDS OF TABLE db_xkonp
+     WHERE knumh = <fs_axxx_final>-knumh.
+  LOOP AT db_xkonp ASSIGNING <fs_dbxkonp>.
+    <fs_dbxkonp>-updkz = 'U'.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF <fs_dbxkonp>-kschl IS INITIAL.
+      <fs_dbxkonp>-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++end
+  ENDLOOP.
+
+  IF db_xkondat[] IS INITIAL.
+    LOOP AT db_xkonh INTO lv_db_xkonh.
+      lv_db_xkondat-knumh = lv_db_xkonh-knumh.
+      lv_db_xkondat-datan = lv_bapicondhd-valid_from.
+      "start of change dxcsupport1 abolival C-003462, DD/MM/YYYY = -14.11.2023
+      IF lv_modif_and_add = 'X'.
+      lv_db_xkondat-datan = <fs_axxx_final>-datab.
+      ENDIF.
+      "end of change
+      READ TABLE db_ykonh INTO lv_db_ykonh WITH KEY knumh = lv_db_xkonh-knumh.
+      IF sy-subrc IS INITIAL.
+        lv_db_xkondat-datab = lv_db_ykonh-datab.
+        lv_db_xkondat-datbi = lv_db_ykonh-datbi.
+        lv_db_xkondat-kz    = lv_db_ykonh-updkz.
+        APPEND lv_db_xkondat TO db_xkondat.
+      ELSE.
+        lv_db_xkondat-datab = lv_db_xkonh-datab.
+        lv_db_xkondat-datbi = lv_db_xkonh-datbi.
+        lv_db_xkondat-kz    = lv_db_xkonh-updkz.
+        APPEND lv_db_xkondat TO db_xkondat.
+      ENDIF.
+    ENDLOOP.
+    CLEAR: lv_db_xkondat.
+  ENDIF.
+
+  IF db_ykondat[] IS INITIAL.
+    LOOP AT db_ykonh INTO lv_db_ykonh.
+      lv_db_ykondat-knumh = lv_db_ykonh-knumh.
+      lv_db_ykondat-datan = lv_db_ykonh-datab.
+      lv_db_ykondat-datab = lv_db_ykonh-datab.
+      lv_db_ykondat-datbi = lv_db_ykonh-datbi.
+      lv_db_ykondat-kz    = lv_db_ykonh-updkz.
+      APPEND lv_db_ykondat TO db_ykondat.
+    ENDLOOP.
+    CLEAR: lv_db_ykondat.
+  ENDIF.
+
+ENDFORM.
+FORM bapi_sd_condition_change.
+  IF p_test IS INITIAL AND lv_haserror IS INITIAL.
+    CALL FUNCTION 'SD_CONDITION_CHANGE_DOCS_WRITE'
+      TABLES
+        p_xkondat = db_xkondat
+        p_ykondat = db_ykondat
+        p_xkonh   = db_xkonh
+        p_xkonm   = db_xkonm
+        p_xkonp   = db_xkonp
+        p_xkonw   = db_xkonw
+        p_ykonh   = db_ykonh
+        p_ykonm   = db_ykonm
+        p_ykonp   = db_ykonp
+        p_ykonw   = db_ykonw.
+
+    LOOP AT lt_bapiret2 INTO lv_bapiret2 WHERE type = 'E'.
+      EXIT.
+    ENDLOOP.
+    IF sy-subrc IS INITIAL.
+      lv_display-col3_message = 'Error in BAPI'.
+      PERFORM set_content_status_error.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    ELSE.
+      LOOP AT lt_bapiret2 INTO lv_bapiret2 WHERE type = 'S' OR type = 'W'.
+        IF lv_bapiret2-message_v3 = 'D' OR lv_bapiret2-message_v3 = 'U'.
+          PERFORM set_content_status_success.
+          APPEND lv_display TO lt_display.
+        ENDIF.
+        EXIT.
+      ENDLOOP.
+      IF sy-subrc = 0.
+
+      ELSE.
+        lv_haserror = 'X'.
+      ENDIF.
+    ENDIF.
+
+    IF lv_haserror = 'X'.
+      EXIT.
+    ENDIF.
+
+  ENDIF.
+ENDFORM.
+
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+FORM f_read_axxx_1.
+
+  "Valid To is between the existing record valid from/to
+  IF lv_key_combination = 995.
+      REFRESH: lt_a995konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~vtweg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a995 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a995konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~vtweg = lv_vtweg
+        AND a~matnr = lv_matnr
+        AND a~datbi GE lv_validfrom
+        AND a~datbi LE lv_validto
+        AND a~datab LT lv_validfrom.
+
+  LOOP AT lt_a995konp INTO lv_a995konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a995konp-kschl IS INITIAL.
+      lv_a995konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a995konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+  IF lv_key_combination = 985.
+      REFRESH: lt_a985konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~zzkunnr a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a985 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a985konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~zzkunnr = lv_shipto
+        AND a~matnr = lv_matnr
+        AND a~datbi GE lv_validfrom
+        AND a~datbi LE lv_validto
+        AND a~datab LT lv_validfrom.
+
+  LOOP AT lt_a985konp INTO lv_a985konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a985konp-kschl IS INITIAL.
+      lv_a985konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a985konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 910.
+      REFRESH: lt_a910konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~matnr a~datbi a~datab a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a910 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a910konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~matnr = lv_matnr
+        AND a~datbi GE lv_validfrom
+        AND a~datbi LE lv_validto
+        AND a~datab LT lv_validfrom
+        .
+  LOOP AT lt_a910konp INTO lv_a910konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a910konp-kschl IS INITIAL.
+      lv_a910konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a910konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 911.
+      REFRESH: lt_a911konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~konda a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a911 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a911konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~konda = lv_konda
+        AND a~matnr = lv_matnr
+        AND a~datbi GE lv_validfrom
+        AND a~datbi LE lv_validto
+        AND a~datab LT lv_validfrom.
+
+  LOOP AT lt_a911konp INTO lv_a911konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a911konp-kschl IS INITIAL.
+       lv_a911konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a911konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 907.
+      REFRESH: lt_a907konp, lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+              b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+       FROM a907 AS a
+       INNER JOIN konp AS b
+       ON a~knumh = b~knumh
+       APPENDING CORRESPONDING FIELDS OF TABLE lt_a907konp
+       WHERE a~kappl = 'V'
+         AND a~kschl = lv_pricecondtype
+         AND a~vkorg = lv_vkorg
+         AND a~matnr = lv_matnr
+         AND a~datbi GE lv_validfrom
+         AND a~datbi LE lv_validto
+         AND a~datab LT lv_validfrom.
+
+  LOOP AT lt_a907konp INTO lv_a907konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a907konp-kschl IS INITIAL.
+      lv_a907konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a907konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+
+  ENDIF.
+ENDFORM.
+
+FORM f_read_axxx_2.
+  IF lv_key_combination = 995.
+
+  REFRESH: lt_a995konp[], lt_axxx_final[].
+  "checking if the file dates has will overlap the existing records
+  "ex.file dates has From: 01/01/2023  Tp: 01/04/2023,  | Existing record-> From:  01/02/2023 To: 01/03/2023
+  SELECT a~kappl a~kschl a~vkorg a~vtweg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+         b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+  FROM a995 AS a
+  INNER JOIN konp AS b
+  ON a~knumh = b~knumh
+  APPENDING CORRESPONDING FIELDS OF TABLE lt_a995konp
+  WHERE a~kappl = 'V'
+    AND a~kschl = lv_pricecondtype
+    AND a~vkorg = lv_vkorg
+    AND a~vtweg = lv_vtweg
+    AND a~matnr = lv_matnr
+    AND a~datab GE lv_validfrom
+    AND a~datbi LE lv_validto.
+
+  LOOP AT lt_a995konp INTO lv_a995konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a995konp-kschl IS INITIAL.
+      lv_a995konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a995konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 985.
+      REFRESH: lt_a985konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~zzkunnr a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a985 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a985konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~zzkunnr = lv_shipto
+        AND a~matnr = lv_matnr
+        AND a~datab GE lv_validfrom
+        AND a~datbi LE lv_validto.
+
+  LOOP AT lt_a985konp INTO lv_a985konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a985konp-kschl IS INITIAL.
+      lv_a985konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a985konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 910.
+      REFRESH: lt_a910konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~matnr a~datbi a~datab a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a910 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a910konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~matnr = lv_matnr
+        AND a~datab GE lv_validfrom
+        AND a~datbi LE lv_validto.
+
+  LOOP AT lt_a910konp INTO lv_a910konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a910konp-kschl IS INITIAL.
+      lv_a910konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a910konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 911.
+      REFRESH: lt_a911konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~konda a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a911 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a911konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~konda = lv_konda
+        AND a~matnr = lv_matnr
+        AND a~datab GE lv_validfrom
+        AND a~datbi LE lv_validto.
+
+  LOOP AT lt_a911konp INTO lv_a911konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a911konp-kschl IS INITIAL.
+      lv_a911konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a911konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 907.
+      REFRESH: lt_a907konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+              b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+       FROM a907 AS a
+       INNER JOIN konp AS b
+       ON a~knumh = b~knumh
+       APPENDING CORRESPONDING FIELDS OF TABLE lt_a907konp
+       WHERE a~kappl = 'V'
+         AND a~kschl = lv_pricecondtype
+         AND a~vkorg = lv_vkorg
+         AND a~matnr = lv_matnr
+         AND a~datab GE lv_validfrom
+         AND a~datbi LE lv_validto.
+
+  LOOP AT lt_a907konp INTO lv_a907konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a907konp-kschl IS INITIAL.
+      lv_a907konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a907konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+
+ENDFORM.
+
+FORM f_read_axxx_3.
+
+  IF lv_key_combination = 995.
+      REFRESH: lt_a995konp[], lt_axxx_final[].
+
+*      "Valid From is between the existing record valid from/to
+      SELECT a~kappl a~kschl a~vkorg a~vtweg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a995 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a995konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~vtweg = lv_vtweg
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validto
+        AND a~datab GE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a995konp INTO lv_a995konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a995konp-kschl IS INITIAL.
+      lv_a995konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a995konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 985.
+      REFRESH: lt_a985konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~zzkunnr a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a985 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a985konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~zzkunnr = lv_shipto
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validto
+        AND a~datab GE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a985konp INTO lv_a985konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a985konp-kschl IS INITIAL.
+      lv_a985konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a985konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 910.
+      REFRESH: lt_a910konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~matnr a~datbi a~datab a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a910 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a910konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validto
+        AND a~datab GE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a910konp INTO lv_a910konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a910konp-kschl IS INITIAL.
+      lv_a910konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a910konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 911.
+      REFRESH: lt_a911konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~konda a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a911 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a911konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~konda = lv_konda
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validto
+        AND a~datab GE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a911konp INTO lv_a911konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a911konp-kschl IS INITIAL.
+      lv_a911konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a911konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 907.
+      REFRESH: lt_a907konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+              b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+       FROM a907 AS a
+       INNER JOIN konp AS b
+       ON a~knumh = b~knumh
+       APPENDING CORRESPONDING FIELDS OF TABLE lt_a907konp
+       WHERE a~kappl = 'V'
+         AND a~kschl = lv_pricecondtype
+         AND a~vkorg = lv_vkorg
+         AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validto
+        AND a~datab GE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a907konp INTO lv_a907konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a907konp-kschl IS INITIAL.
+      lv_a907konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a907konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+ENDFORM.
+FORM f_read_axxx_4.
+  IF lv_key_combination = 995.
+      REFRESH: lt_a995konp[], lt_axxx_final[].
+
+*      "Valid From is between the existing record valid from/to
+      SELECT a~kappl a~kschl a~vkorg a~vtweg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a995 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a995konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~vtweg = lv_vtweg
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validfrom
+        AND a~datbi GT lv_validto
+        AND a~datab LE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a995konp INTO lv_a995konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a995konp-kschl IS INITIAL.
+      lv_a995konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a995konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+  IF lv_key_combination = 985.
+      REFRESH: lt_a985konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~zzkunnr a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a985 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a985konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~zzkunnr = lv_shipto
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validfrom
+        AND a~datbi GT lv_validto
+        AND a~datab LE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a985konp INTO lv_a985konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a985konp-kschl IS INITIAL.
+      lv_a985konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a985konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+  IF lv_key_combination = 910.
+      REFRESH: lt_a910konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~kunnr a~matnr a~datbi a~datab a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a910 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a910konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~kunnr = lv_kunnr
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validfrom
+        AND a~datbi GT lv_validto
+        AND a~datab LE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a910konp INTO lv_a910konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a910konp-kschl IS INITIAL.
+      lv_a910konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a910konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+  IF lv_key_combination = 911.
+      REFRESH: lt_a911konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~konda a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+             b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+      FROM a911 AS a
+      INNER JOIN konp AS b
+      ON a~knumh = b~knumh
+      APPENDING CORRESPONDING FIELDS OF TABLE lt_a911konp
+      WHERE a~kappl = 'V'
+        AND a~kschl = lv_pricecondtype
+        AND a~vkorg = lv_vkorg
+        AND a~konda = lv_konda
+        AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validfrom
+        AND a~datbi GT lv_validto
+        AND a~datab LE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a911konp INTO lv_a911konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a911konp-kschl IS INITIAL.
+      lv_a911konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a911konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+  ENDIF.
+
+  IF lv_key_combination = 907.
+
+      REFRESH: lt_a907konp[], lt_axxx_final[].
+      SELECT a~kappl a~kschl a~vkorg a~matnr a~kfrst a~datbi a~datab a~kbstat a~knumh
+              b~konwa b~kbetr b~kmein b~kpein b~loevm_ko
+       FROM a907 AS a
+       INNER JOIN konp AS b
+       ON a~knumh = b~knumh
+       APPENDING CORRESPONDING FIELDS OF TABLE lt_a907konp
+       WHERE a~kappl = 'V'
+         AND a~kschl = lv_pricecondtype
+         AND a~vkorg = lv_vkorg
+         AND a~matnr = lv_matnr
+        AND a~datbi GT lv_validfrom
+        AND a~datbi GT lv_validto
+        AND a~datab LE lv_validfrom
+        AND a~datab LE lv_validto.
+
+  LOOP AT lt_a907konp INTO lv_a907konp.
+    "+++dxcsupport1 abolival I-003722, DD/MM/YYYY = -13.03.2024
+    IF lv_a907konp-kschl IS INITIAL.
+      lv_a907konp-kschl = lv_file_contents-col1.
+    ENDIF.
+    "+++END
+    MOVE-CORRESPONDING  lv_a907konp TO lv_axxx_final.
+    APPEND lv_axxx_final TO lt_axxx_final.
+  ENDLOOP.
+
+
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_BAPI_009_1
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_bapi_009_1 .
+  lv_operation = '009'.
+  lv_bapicondct-operation    = lv_operation.
+*    CLEAR: lv_knumh.
+*    lv_knumh = lv_bapicondct-cond_no.
+  lv_bapicondct-cond_no      = <fs_axxx_final>-knumh.
+  lv_bapicondct-cond_usage   = 'A'.   "A = Pricing Condition
+  lv_bapicondct-cond_type    = lv_pricecondtype. "ZPR0
+  lv_bapicondct-table_no     = lv_key_combination.
+  lv_bapicondct-applicatio   = 'V'. "V = Sales/Distribution
+  lv_bapicondct-varkey       = lv_finalvarkey_ct.
+  lv_bapicondct-valid_to     = lv_validfrom - 1.
+  lv_bapicondct-valid_from   = <fs_axxx_final>-datab.
+  APPEND lv_bapicondct TO lt_bapicondct.
+
+  lv_bapicondhd-operation    = lv_bapicondct-operation.
+  lv_bapicondhd-cond_no      = lv_bapicondct-cond_no.
+  lv_bapicondhd-created_by   = sy-uname.
+  lv_bapicondhd-creat_date   = sy-datum.
+  lv_bapicondhd-cond_usage   = 'A'.
+  lv_bapicondhd-table_no     = lv_key_combination.
+  lv_bapicondhd-applicatio   = 'V'.
+  lv_bapicondhd-cond_type    = lv_pricecondtype.
+  lv_bapicondhd-varkey       = lv_finalvarkey_ct.
+  lv_bapicondhd-valid_to     = lv_validfrom - 1..
+  lv_bapicondhd-valid_from   = <fs_axxx_final>-datab.
+  APPEND lv_bapicondhd TO lt_bapicondhd.
+
+  lv_bapicondit-operation    = lv_bapicondct-operation.
+  lv_bapicondit-cond_no      = lv_bapicondct-cond_no.
+  lv_bapicondit-cond_count   = lv_count.
+  lv_bapicondit-applicatio   = 'V'.
+  lv_bapicondit-customer    = lv_kunnr.
+  lv_bapicondit-calctypcon  = lv_calctype.
+  lv_bapicondit-cond_value  = <fs_axxx_final>-kbetr.
+  lv_bapicondit-condcurr    = <fs_axxx_final>-konwa.
+  lv_bapicondit-cond_p_unt  = <fs_axxx_final>-kpein.
+  lv_bapicondit-cond_unit   = <fs_axxx_final>-kmein.
+  lv_bapicondit-status      = <fs_axxx_final>-kfrst.
+  lv_bapicondit-indidelete  = <fs_axxx_final>-loevm_ko.
+  lv_delete_indicator       = lv_bapicondit-indidelete. "lv_delete_indicator will be use in 009(Creation)
+  lv_bapicondit-cond_type    = lv_pricecondtype. "+dxcsupport1 abolival I-003722 ,  DD/MM/YYYY = 13.03.2024
+  APPEND lv_bapicondit TO lt_bapicondit.
+ENDFORM.                    " POPULATE_BAPI_009_1
