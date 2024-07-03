@@ -1,0 +1,238 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_ROBINSON_RTVUPLD_TOP_V1
+*&---------------------------------------------------------------------*
+TABLES: zcusship,  zcusmat,
+        zcusshipf, zcusmatf.
+
+CONSTANTS: c_header TYPE string VALUE 'Header',
+           c_item  TYPE string VALUE 'Item',
+           c_bapi TYPE string VALUE 'Standard'.
+
+TYPES: BEGIN OF ts_cutpath,
+  col1 TYPE c LENGTH 255,
+  END OF ts_cutpath.
+TYPES: BEGIN OF ts_cuttedpath,
+  col1 TYPE c LENGTH 255,
+  col2 TYPE sy-tabix,
+  END OF ts_cuttedpath.
+
+TYPES: BEGIN OF ts_display,
+  traffic TYPE c LENGTH 4,
+  err_type TYPE c,
+  err_loc TYPE string,
+  row_i TYPE i,
+  vbeln TYPE vbak-vbeln,
+  message TYPE string,
+  END OF ts_display.
+
+TYPES: BEGIN OF ts_display_final,
+  traffic TYPE c LENGTH 4,
+  err_type TYPE c,
+  err_loc TYPE string,
+  row_i TYPE string,
+  vbeln TYPE vbak-vbeln,
+  message TYPE string,
+  END OF ts_display_final.
+
+TYPES: BEGIN OF ts_salestype,
+  bukrs TYPE bukrs,
+  auart TYPE auart,
+  vkorg TYPE vkorg,
+
+END OF ts_salestype.
+TYPES: BEGIN OF ts_file,
+  col1  TYPE string, "A OPER_LEVEL2_DESC
+  col2  TYPE string, "B CMP_ADDRESS1
+  col3  TYPE string, "C CMP_PHONE_NO
+  col4  TYPE string, "D CMP_EMAIL_ADD
+  col5  TYPE string, "E CMP_FAX_NO
+  col6  TYPE string, "F RTV_DATE
+  col7  TYPE string, "G VENDOR_ITEM_REF_NO
+  col8  TYPE string, "H PICK_UP_DEADLINE
+  col9  TYPE string, "I DM_NO
+  col10 TYPE string, "J RTV_NO                "PO #        , required
+  col11 TYPE string, "K SKU_NO
+  col12 TYPE zcsmat, "L ean_number            "Item Code   , required
+  col13 TYPE zcscod, "M stores                "SHIP TO CODE, required
+  col14 TYPE string, "N CITY
+  col15 TYPE string, "O vendor
+  col16 TYPE string, "P product_description
+  col17 TYPE string, "Q RTV_REASON            "Order Reason, required
+  col18 TYPE string, "R REMARKS
+  col19 TYPE string, "S VO_TOT_RECD_QTY       "Qty         , required
+  col20 TYPE string, "T UNIT_COST
+  col21 TYPE string, "U TOTAL_NET_COST
+  col22 TYPE string, "V IMAGE_ATTACH_PATH
+  END OF ts_file.
+
+TYPES: BEGIN OF ts_vbak,
+  audat TYPE vbak-erdat,
+  bstnk TYPE vbak-bstnk, "po
+  bstdk TYPE vbak-bstdk, "po order date
+  mahdt TYPE vbak-mahdt,
+  auart TYPE vbak-auart, "doc type
+  vkorg TYPE vbak-vkorg, "sales org
+  vtweg TYPE vbak-vtweg, "dist channel
+  soldt TYPE vbak-kunnr, "sold to
+  shipt TYPE vbak-kunnr, "ship to
+  vdatu TYPE vbak-vdatu, "req_date_h
+  spart TYPE vbak-spart, "Division
+  vbtyp TYPE vbak-vbtyp, "Document Category
+  reason_code TYPE string,
+  abrvw TYPE vbak-abrvw,
+END OF ts_vbak.
+
+TYPES: BEGIN OF ts_vbap,
+  matnr TYPE vbap-matnr,
+  posnr TYPE vbap-posnr,
+  kwmeng TYPE vbap-kwmeng,
+  werks TYPE vbap-werks,
+  vkaus TYPE vbap-vkaus,
+  END OF ts_vbap.
+
+TYPES: BEGIN OF ts_kna1_knvp,
+  kunnr TYPE kunnr,
+  vkorg TYPE vkorg,
+  vtweg TYPE vtweg,
+  spart TYPE spart,
+  kunn2 TYPE kunn2,
+  parvw TYPE parvw,
+  ktokd TYPE ktokd,
+  END OF ts_kna1_knvp.
+
+DATA: lt_kna1_knvp TYPE TABLE OF  ts_kna1_knvp,
+      ls_kna1_knvp TYPE ts_kna1_knvp.
+
+DATA: lt_vbak TYPE STANDARD TABLE OF ts_vbak,
+      ls_vbak TYPE ts_vbak,
+      lt_vbap TYPE STANDARD TABLE OF ts_vbap,
+      ls_vbap TYPE ts_vbap.
+
+DATA: lv_werks TYPE werks_ext,
+      lv_auart TYPE vbak-auart,
+      lv_zfds TYPE zcusship-zfds.
+
+DATA: lv_vbeln TYPE vbkd-vbeln,
+      lv_bstkd TYPE vbkd-bstkd.
+
+DATA: lv_endofmonth TYPE d.
+
+DATA: lt_file TYPE STANDARD TABLE OF ts_file,
+      lt_file_temp TYPE STANDARD TABLE OF ts_file,
+      ls_file TYPE ts_file.
+
+DATA: lv_path TYPE string,
+      lt_filetable TYPE filetable,
+      ls_filetable LIKE LINE OF lt_filetable,
+      lv_rc TYPE i.
+
+DATA: lv_filename TYPE c LENGTH 1024,
+      lv_extension TYPE c LENGTH 10.
+
+DATA: lt_cutpath TYPE TABLE OF ts_cutpath,
+      ls_cutpath LIKE LINE OF lt_cutpath,
+      lt_cuttedpath TYPE TABLE OF ts_cuttedpath,
+      ls_cuttedpath TYPE ts_cuttedpath.        .
+DATA: lv_file TYPE string.
+
+DATA: lv_localfile TYPE localfile,
+      lt_kcde_intern_struc TYPE STANDARD TABLE OF kcde_intern_struc WITH HEADER LINE,
+      lv_index TYPE i.
+DATA: lt_tab_raw_data TYPE truxs_t_text_data.
+DATA: lv_tabix TYPE sy-tabix.
+
+DATA: lt_alsmex_tabline TYPE STANDARD TABLE OF alsmex_tabline WITH HEADER LINE.
+DATA: lt_rstrucinfo TYPE STANDARD TABLE OF rstrucinfo WITH HEADER LINE.
+
+FIELD-SYMBOLS: <fs_file>.
+
+DATA: lv_count TYPE i.
+
+DATA: lt_display TYPE STANDARD TABLE OF ts_display,
+      lt_display_final TYPE STANDARD TABLE OF ts_display_final,
+      ls_display TYPE ts_display,
+      ls_display_final TYPE ts_display_final.
+FIELD-SYMBOLS: <fs_display_final> TYPE ts_display_final.
+
+DATA: lv_stop TYPE c,
+      lv_has_error TYPE c.
+
+DATA: lt_salestype TYPE STANDARD TABLE OF ts_salestype,
+      ls_salestype TYPE ts_salestype.
+
+DATA: lt_tvarvc_doctype TYPE TABLE OF tvarvc,
+      ls_tvarvc_doctype LIKE LINE OF lt_tvarvc_doctype.
+
+DATA: lt_zcusship TYPE STANDARD TABLE OF zcusship,
+      ls_zcusship TYPE zcusship,
+      lt_zcusmat TYPE STANDARD TABLE OF zcusmat,
+      ls_zcusmat TYPE zcusmat,
+      lt_zcusshipf TYPE STANDARD TABLE OF zcusshipf,
+      ls_zcusshipf TYPE zcusshipf,
+      lt_zcusmatf TYPE STANDARD TABLE OF zcusmatf,
+      ls_zcusmatf TYPE zcusmatf.
+
+TYPES: BEGIN OF ts_zcusmat_merge,
+  zcsmat TYPE zcsmat,
+  kunnr  TYPE kunnr,
+  matnr  TYPE matnr,
+  name1  TYPE name1,
+  maktx  TYPE maktx,
+  zmaktx TYPE zmaktx,
+  END OF ts_zcusmat_merge.
+DATA: lt_zcusmat_merge TYPE STANDARD TABLE OF ts_zcusmat_merge,
+      ls_zcusmat_merge TYPE ts_zcusmat_merge.
+
+DATA: gv_day TYPE i,
+      gv_docday TYPE p DECIMALS 0.
+
+DATA: lv_yymmdd TYPE i,
+      lv_yymmdd_current TYPE i.
+
+DATA: lt_kotg501 TYPE TABLE OF kotg501,
+      ls_kotg501 LIKE LINE OF lt_kotg501.
+DATA: lt_kotg502 TYPE TABLE OF kotg502,
+      ls_kotg502 LIKE LINE OF lt_kotg502.
+DATA: lt_kotg503 TYPE TABLE OF kotg503,
+      ls_kotg503 LIKE LINE OF lt_kotg503.
+DATA: lt_kotg504 TYPE TABLE OF kotg504,
+      ls_kotg504 LIKE LINE OF lt_kotg504.
+DATA: lt_kotn010 TYPE TABLE OF kotn010,
+      ls_kotn010 LIKE LINE OF lt_kotn010.
+DATA: lt_kondn TYPE TABLE OF kondn,
+      ls_kondn LIKE LINE OF lt_kondn.
+
+DATA: lv_blocked(1) TYPE c.
+DATA: lv_posnr(6) TYPE n.
+DATA: lv_date TYPE sy-datum.
+
+DATA : ls_order_header_in LIKE bapisdhd1,
+       lt_return LIKE bapiret2 OCCURS 0 WITH HEADER LINE,
+       ls_salesdocument LIKE  bapivbeln-vbeln.
+
+DATA:
+      lt_sales_items_in TYPE STANDARD TABLE OF bapisditm,
+      ls_sales_items_in TYPE bapisditm,
+      lt_sales_items_inx TYPE STANDARD TABLE OF bapisditmx,
+      ls_sales_items_inx TYPE bapisditmx,
+      lt_sales_partners TYPE STANDARD TABLE OF bapiparnr,
+      ls_sales_partners TYPE bapiparnr,
+      lt_sales_schedules_in TYPE STANDARD TABLE OF bapischdl,
+      ls_sales_schedules_in TYPE bapischdl,
+      ls_return_partners TYPE bapiparnr,
+      lt_return_partners TYPE STANDARD TABLE OF bapiparnr.
+
+
+CONSTANTS: lc_business_obj TYPE oj_name VALUE 'BUS2102',
+           lc_doccat TYPE string VALUE 'H'.
+"-----------------------------------------------------------------------
+"Parameters
+"-----------------------------------------------------------------------
+SELECTION-SCREEN: BEGIN OF BLOCK b1 WITH FRAME.
+PARAMETERS: p_bukrs TYPE bukrs OBLIGATORY,
+            p_path TYPE string OBLIGATORY LOWER CASE,
+            p_reason TYPE tvau-augru, "OBLIGATORY,
+            p_usgind TYPE tvlv-abrvw." OBLIGATORY,.
+
+PARAMETERS: p_test TYPE c AS CHECKBOX DEFAULT 'X'.
+SELECTION-SCREEN: END OF BLOCK b1.
