@@ -1,0 +1,611 @@
+*----------------------------------------------------------------------*
+*   Program         :  ZSD_SMUPLOAD_PRG
+*   Description     :  SM Mass upload Tool RA
+*
+*----------------------------------------------------------------------*
+*   Module(s)       :
+*   Author          :  DXC Technology / abolival
+*   Date Created    :  20.10.2023
+*----------------------------------------------------------------------*
+*   Run Frequency      :
+*   Transaction Code   : ZSD_MASSSMUPL
+*   Input File Names   :
+*   Output File Names  :
+*----------------------------------------------------------------------*
+*   Customized Tables  :
+*   Programs Used	     :
+*----------------------------------------------------------------------*
+* Modify/Change Log History
+*----------------------------------------------------------------------*
+* Key     Modified by  |   Date   |        Description                 *
+*----------------------------------------------------------------------*
+* 00001 |abolival      |20.10.2023 | Initial Development
+*
+*----------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+* Ticket     Key   | Modified by |   Date    | Description                 *
+*----------------------------------------------------------------------*
+* C-003478|  00001 |   abolival  |10.20.2023 | Initial Dev
+* C-003478|  00002 |   abolival  |01.04.2024 | Add Doctype for FPGMC
+* C-003478|  00003 |   abolival  |03.13.2024 | FIx ZCUSMAT/F Filter
+*----------------------------------------------------------------------*
+
+
+REPORT zsd_smupload_prg.
+
+INCLUDE zsd_smupload_top.
+INCLUDE zsd_smupload_form.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_upl.
+
+  PERFORM open_file.
+
+
+AT SELECTION-SCREEN. "ON p_upl.
+  lv_filename = p_upl.
+  IF lv_filename IS INITIAL.
+    MESSAGE 'Error: please upload the file' TYPE 'E'.
+  ENDIF.
+
+  PERFORM get_file_extension.
+
+  IF ( p_bukrs <> 'NA01' AND p_bukrs <> 'NA02' ).
+    MESSAGE 'Company Code is not Allowed' TYPE 'E'.
+  ENDIF.
+
+START-OF-SELECTION.
+
+  TRANSLATE lv_extension TO UPPER CASE.
+  IF lv_extension = 'XML'.
+    PERFORM xml_to_itab.
+  ELSEIF lv_extension = 'XLSX'.
+*    PERFORM xlsx_to_itab.
+  ENDIF.
+
+  IF p_test = 'X'.
+    lv_testrun = 'X'.
+  ENDIF.
+
+  CLEAR: lv_xml.
+
+  SELECT * FROM tvarvc INTO TABLE lt_tvarvc WHERE name = lv_tvarv_name1.
+  IF sy-subrc <> 0.
+*      lv_error_message = |No { lv_tvarv_name1 } found in STVARV|.
+*      PERFORM error_message.
+  ELSE.
+    LOOP AT lt_tvarvc INTO lv_tvarvc.
+      gv_range-sign = lv_tvarvc-sign.
+      gv_range-opti = lv_tvarvc-opti.
+      gv_range-low = lv_tvarvc-low.
+      gv_range-high = lv_tvarvc-high.
+      APPEND gv_range TO gt_range.
+    ENDLOOP.
+    CLEAR: lv_tvarvc.
+  ENDIF.
+
+  IF p_bukrs = 'NA01'.
+    SELECT * FROM zcusship INTO CORRESPONDING FIELDS OF TABLE lt_zcusship FOR ALL ENTRIES IN lt_xml WHERE zcscod = lt_xml-sitecode AND ( auart = c_zor OR auart = c_zdr ).
+
+    lv_bukrs_vkorg = '1000'.
+
+    IF lt_zcusship IS NOT INITIAL.
+      "+sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 13.03.2024 remove
+*      SELECT * FROM zcusmat INTO CORRESPONDING FIELDS OF TABLE lt_zcusmat FOR ALL ENTRIES IN lt_zcusship WHERE kunnr = lt_zcusship-kunnr.
+*      IF lt_zcusmat IS NOT INITIAL.
+*      ELSE.
+*        lv_error_message = |No data found in ZCUSMAT|.
+*        PERFORM error_message.
+*      ENDIF.
+      "+end
+
+
+      "Get List of OVD Store (ZDR) Doctype
+      SELECT * FROM zsd_sm_ovd
+        INTO TABLE lt_ovd_store
+        FOR ALL ENTRIES IN lt_zcusship
+        WHERE shipto = lt_zcusship-kunnr.
+
+        "+sapsupport2 jdiarios C-003478 06/03/2024
+        IF sy-subrc = 0.
+          LOOP.
+
+          ENDLOOP.
+          gv_zdr = 'X'.
+        ENDIF.
+        "+sapsupport2 jdiarios C-003478 06/03/2024
+
+      "Get VKORG,VTWEG,SPART
+      SELECT a~kunnr a~ktokd
+             b~kunn2 b~vkorg b~vtweg b~spart b~parvw
+        FROM kna1 AS a INNER JOIN
+             knvp AS b
+        ON a~kunnr = b~kunnr
+        INTO CORRESPONDING FIELDS OF TABLE lt_kna1_knvp
+        FOR ALL ENTRIES IN lt_zcusship
+        WHERE a~ktokd = 'Z001'
+          AND b~parvw = 'WE'
+          AND b~kunn2 = lt_zcusship-kunnr
+        .
+
+    ELSE.
+      lv_error_message = |No data found in ZCUSSHIP|.
+      PERFORM error_message.
+    ENDIF.
+  ELSEIF p_bukrs = 'NA02'.
+
+    lv_bukrs_vkorg = '5000'.
+
+
+    SELECT * FROM zcusshipf INTO TABLE lt_zcusshipf FOR ALL ENTRIES IN lt_xml WHERE zcscod = lt_xml-sitecode AND ( auart = c_zos1 OR auart = c_zsdr ).
+
+    IF lt_zcusshipf IS NOT INITIAL.
+      "+sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 13.03.2024 remove
+*      SELECT * FROM zcusmatf INTO CORRESPONDING FIELDS OF TABLE lt_zcusmatf FOR ALL ENTRIES IN lt_zcusshipf WHERE kunnr = lt_zcusshipf-kunnr.
+*      IF lt_zcusmatf IS NOT INITIAL.
+*      ELSE.
+*        lv_error_message = |No data found in ZCUSMATF|.
+*        PERFORM error_message.
+*      ENDIF.
+      "+end
+
+      "Get List of OVD Store (ZDR) Doctype
+      SELECT * FROM zsd_sm_ovd
+        INTO TABLE lt_ovd_store
+        FOR ALL ENTRIES IN lt_zcusshipf
+        WHERE shipto = lt_zcusshipf-kunnr.
+
+
+      "Get VKORG,VTWEG,SPART
+      SELECT a~kunnr a~ktokd
+             b~kunn2 b~vkorg b~vtweg b~spart b~parvw
+        FROM kna1 AS a INNER JOIN
+             knvp AS b
+        ON a~kunnr = b~kunnr
+        INTO CORRESPONDING FIELDS OF TABLE lt_kna1_knvp
+        FOR ALL ENTRIES IN lt_zcusshipf
+        WHERE a~ktokd = 'Z005'
+          AND b~parvw = 'WE'
+          AND b~kunn2 = lt_zcusshipf-kunnr
+        .
+
+    ELSE.
+      lv_error_message = |No data found in ZCUSSHIPF|.
+      PERFORM error_message.
+    ENDIF.
+  ENDIF.
+
+*  IF lv_has_error IS INITIAL.
+
+
+  CLEAR: lv_zcusship, lv_zcusmat, lv_zcusshipf, lv_zcusmatf.
+
+  "Get PO and change
+  LOOP AT lt_xml ASSIGNING <fs_xml>." WHERE ( ppsitecode IN gt_range ) OR ( sitecode IN gt_range ).
+
+    <fs_xml>-modified_po = <fs_xml>-documentnumber.
+
+    READ TABLE lt_tvarvc INTO lv_tvarvc WITH KEY low = <fs_xml>-sitecode.
+    IF sy-subrc = 0.
+      IF <fs_xml>-sitecode IS NOT INITIAL.
+         <fs_xml>-modified_po = |{ <fs_xml>-documentnumber }/T|.
+      ENDIF.
+    ELSE.
+      READ TABLE lt_tvarvc INTO lv_tvarvc WITH KEY low = lv_xml-ppsitecode.
+      IF sy-subrc = 0.
+        IF lv_xml-ppsitecode IS NOT INITIAL.
+          <fs_xml>-modified_po = |{ <fs_xml>-documentnumber }/T|.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDLOOP.
+
+
+  "+sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 13.03.2024
+  IF p_bukrs = 'NA01'.
+      SELECT * FROM zcusmat INTO CORRESPONDING FIELDS OF TABLE lt_zcusmat FOR ALL ENTRIES IN lt_xml WHERE zcsmat = lt_xml-upc.
+      IF lt_zcusmat IS NOT INITIAL.
+      ELSE.
+        lv_error_message = |No data found in ZCUSMAT|.
+        PERFORM error_message.
+      ENDIF.
+  ELSEIF p_bukrs = 'NA02'.
+      SELECT * FROM zcusmatf INTO CORRESPONDING FIELDS OF TABLE lt_zcusmatf FOR ALL ENTRIES IN lt_xml WHERE zcsmat = lt_xml-upc.
+      IF lt_zcusmatf IS NOT INITIAL.
+      ELSE.
+        lv_error_message = |No data found in ZCUSMATF|.
+        PERFORM error_message.
+      ENDIF.
+  ENDIF.
+
+  CLEAR: lv_error_message.
+  "+end
+
+  UNASSIGN: <fs_xml>.
+  "Check Duplicate PO
+*  SELECT a~kunnr a~vbeln a~bstnk a~bstkd
+*    INTO TABLE lt_check_po
+*    FROM vbak
+*    FOR ALL ENTRIES IN lt_xml
+*    WHERE bstnk = lt_xml-modified_po
+*      AND ( auart = 'ZOR' OR auart = 'ZDR' )
+*      AND vkorg = lv_bukrs_vkorg.
+
+    SELECT b~kunnr b~vbeln b~bstnk a~bstkd
+    INTO TABLE lt_check_po
+    FROM vbkd AS a INNER JOIN
+         vbak AS b
+    ON a~vbeln EQ b~vbeln
+    FOR ALL ENTRIES IN lt_xml
+    WHERE a~bstkd_m = lt_xml-modified_po
+      AND a~posnr   = space
+      AND b~kunnr   = b~kunnr
+      AND ( b~auart = 'ZOR' OR b~auart = 'ZDR' OR b~auart = 'ZOS1' ) "abolival 3/13/2024 add ZOS1
+      AND b~vkorg = lv_bukrs_vkorg. "Sales Org
+
+
+
+  lt_zcusship2 = lt_zcusship.
+  lt_zcusshipf2 = lt_zcusshipf.
+
+  LOOP AT lt_xml INTO lv_xml.
+
+"-----------------------------------------------------------------------
+"Header Level
+"-----------------------------------------------------------------------
+IF lv_header_level = ''.
+    CLEAR: gv_so_h.
+    CLEAR: lv_remarks,lv_werks,lv_matnr,lv_qty.
+    CLEAR: lv_sales_header_in, lv_sales_partners.
+
+    gv_so_h-audat = sy-datum.
+
+
+    "Document Type and Plant and Ship to
+    CLEAR: lv_zcusship2, lv_zcusshipf2.
+    IF p_bukrs = 'NA01'.
+
+      IF 1 = 2. "IF OVD Table is needed use this
+        READ TABLE lt_zcusship INTO lv_zcusship WITH KEY zcscod = lv_xml-sitecode .
+        IF sy-subrc = 0.
+
+          LOOP AT lt_zcusship INTO lv_zcusship WHERE zcscod = lv_xml-sitecode.
+            READ TABLE lt_ovd_store INTO lv_ovd_store WITH KEY shipto = lv_zcusship-kunnr
+                                                               auart  = lv_zcusship-auart.
+            IF sy-subrc = 0.
+              READ TABLE lt_zcusship2 INTO lv_zcusship2 WITH KEY zcscod = lv_xml-sitecode
+                                                                 auart  = lv_ovd_store-auart.
+              lv_auart = lv_zcusship2-auart.
+              lv_werks = lv_zcusship2-werks.
+              lv_shipto = lv_zcusship2-kunnr.
+
+              EXIT.
+            ELSE.
+              READ TABLE lt_zcusship2 INTO lv_zcusship2 WITH KEY zcscod = lv_xml-sitecode
+                                                                 auart  = c_zor.
+              IF sy-subrc = 0.
+                lv_auart = lv_zcusship-auart.
+                lv_werks = lv_zcusship-werks.
+                lv_shipto = lv_zcusship-kunnr.
+                EXIT.
+              ENDIF.
+            ENDIF.
+
+          ENDLOOP.
+
+          gv_so_h-auart = lv_auart.
+          gv_so_h-shipt = lv_shipto.
+
+        ELSE.
+          lv_error_message = |Sitecode ( { lv_xml-sitecode } ) with Document Type ZOR/ZDR is not maintained|.
+          PERFORM error_message.
+        ENDIF.
+      ENDIF.
+
+      READ TABLE lt_zcusship INTO lv_zcusship WITH KEY zcscod = lv_xml-sitecode
+                                                       auart  = c_zor.
+      IF sy-subrc = 0.
+           lv_auart = lv_zcusship-auart.
+           lv_werks = lv_zcusship-werks.
+           lv_shipto = lv_zcusship-kunnr.
+
+           gv_so_h-auart = lv_auart.
+           gv_so_h-shipt = lv_shipto.
+      ENDIF.
+      READ TABLE lt_zcusship INTO lv_zcusship WITH KEY zcscod = lv_xml-sitecode
+                                                       auart  = c_zdr.
+      IF sy-subrc = 0.
+          gv_zdr = 'X'.
+          lv_auart = lv_zcusship-auart.
+          lv_werks = lv_zcusship-werks.
+          lv_shipto = lv_zcusship-kunnr.
+
+          gv_so_h-auart = lv_auart.
+          gv_so_h-shipt = lv_shipto.
+      ENDIF.
+
+      IF gv_so_h-auart IS INITIAL.
+          lv_error_message = |Sitecode ( { lv_xml-sitecode } ) with Document Type ZOR/ZDR is not maintained|.
+          PERFORM error_message.
+      ENDIF.
+
+
+    ENDIF.
+
+    IF p_bukrs = 'NA02'.
+      IF 1 = 2. "IF OVD Table is needed use this
+        READ TABLE lt_zcusshipf INTO lv_zcusshipf WITH KEY zcscod = lv_xml-sitecode .
+        IF sy-subrc = 0.
+
+          LOOP AT lt_zcusshipf INTO lv_zcusshipf WHERE zcscod = lv_xml-sitecode.
+            READ TABLE lt_ovd_store INTO lv_ovd_store WITH KEY shipto = lv_zcusshipf-kunnr
+                                                               auart  = lv_zcusshipf-auart.
+            IF sy-subrc = 0.
+              READ TABLE lt_zcusshipf2 INTO lv_zcusshipf2 WITH KEY zcscod = lv_xml-sitecode
+                                                                   auart  = lv_ovd_store-auart.
+              lv_auart = lv_zcusshipf2-auart.
+              lv_werks = lv_zcusshipf2-werks.
+              lv_shipto = lv_zcusshipf2-kunnr.
+
+
+              EXIT.
+            ELSE.
+              READ TABLE lt_zcusshipf2 INTO lv_zcusshipf2 WITH KEY zcscod = lv_xml-sitecode
+                                                                   auart  = c_zos1.
+              IF sy-subrc = 0.
+                lv_auart = lv_zcusshipf-auart.
+                lv_werks = lv_zcusshipf-werks.
+                lv_shipto = lv_zcusshipf-kunnr.
+                EXIT.
+              ENDIF.
+            ENDIF.
+
+          ENDLOOP.
+
+          gv_so_h-auart = lv_auart.
+          gv_so_h-shipt = lv_shipto.
+
+        ELSE.
+          lv_error_message = |Sitecode ( { lv_xml-sitecode } ) with Document Type ZOS1/ZSDR is not maintained|.
+          PERFORM error_message.
+        ENDIF.
+
+      ENDIF.
+
+      READ TABLE lt_zcusshipf INTO lv_zcusshipf WITH KEY zcscod = lv_xml-sitecode
+                                                         auart  = c_zos1.
+      IF sy-subrc = 0.
+*Begin of Change sapsuppoirt2 jdiarios C-003478 04/12/2024
+*           lv_auart = lv_zcusshipf2-auart.
+*           lv_werks = lv_zcusshipf2-werks.
+*           lv_shipto = lv_zcusshipf2-kunnr.   "Original
+
+           lv_auart = lv_zcusshipf-auart.
+           lv_werks = lv_zcusshipf-werks.
+           lv_shipto = lv_zcusshipf-kunnr.
+
+*End of Change sapsuppoirt2 jdiarios C-003478 04/12/2024
+           gv_so_h-auart = lv_auart.
+           gv_so_h-shipt = lv_shipto.
+      ENDIF.
+      READ TABLE lt_zcusshipf INTO lv_zcusshipf WITH KEY zcscod = lv_xml-sitecode
+                                                         auart  = c_zsdr.
+      IF sy-subrc = 0.
+*Begin of Change sapsuppoirt2 jdiarios C-003478 04/12/2024
+*           lv_auart = lv_zcusshipf2-auart.
+*           lv_werks = lv_zcusshipf2-werks.
+*           lv_shipto = lv_zcusshipf2-kunnr.   "Original
+
+           lv_auart = lv_zcusshipf-auart.
+           lv_werks = lv_zcusshipf-werks.
+           lv_shipto = lv_zcusshipf-kunnr.
+
+*End of Change sapsuppoirt2 jdiarios C-003478 04/12/2024
+
+           gv_so_h-auart = lv_auart.
+           gv_so_h-shipt = lv_shipto.
+      ENDIF.
+
+      IF gv_so_h-auart IS INITIAL.
+          lv_error_message = |Sitecode ( { lv_xml-sitecode } ) with Document Type ZOS1/ZSDR is not maintained|.
+          PERFORM error_message.
+      ENDIF.
+
+    ENDIF.
+
+
+    IF lv_werks IS INITIAL.
+      lv_error_message = |Plant is required|.
+      PERFORM error_message.
+    ENDIF.
+    IF lv_shipto IS INITIAL.
+      lv_error_message = |Ship To from ZCUSSHIP/ZCUSSHIPF is required|.
+      PERFORM error_message.
+    ENDIF.
+
+
+    "Document Number -> PO
+*    lv_po_no = lv_xml-modified_po.
+
+    "Date Cancel -> Last Contact Date
+    SPLIT lv_xml-datecancel AT '/'
+      INTO lv_mm lv_dd lv_yyyy.
+
+    lv_date_cancel = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+    CLEAR: lv_yyyy , lv_mm , lv_dd.
+
+    gv_so_h-mahdt = lv_date_cancel.
+    CLEAR: lv_date_cancel.
+
+    "Date Receipt -> RDD
+*Begin of Change sapsuppoirt2 jdiarios C-003478 04/12/2024 "Comment out
+*    READ TABLE lt_zcusship INTO lv_zcusship WITH KEY kunnr = gv_so_h-shipt.
+*    IF sy-subrc = 0.
+*      gv_zfds = lv_zcusship-zfds.
+*
+*      CALL FUNCTION 'DAY_IN_WEEK'
+*        EXPORTING
+*          datum = gv_so_h-audat
+*        IMPORTING
+*          wotnr = gv_docday.
+*
+*      IF gv_zfds LE gv_docday.
+*        ADD 7 TO gv_zfds.
+*      ENDIF.
+*
+*      IF ( gv_zfds - gv_docday ) LT 2 OR ( ( gv_docday - gv_zfds ) EQ 2 AND gv_docday EQ 6 ).
+*        ADD 7 TO gv_zfds.
+*      ENDIF.
+*
+*       gv_so_h-vdatu =  ( gv_zfds - gv_docday ) + gv_so_h-audat.
+*
+*       CLEAR: gv_zfds, gv_docday.
+*    ELSE.
+      SPLIT lv_xml-datereceipt AT '/'
+        INTO lv_mm lv_dd lv_yyyy.
+
+      lv_date_receipt = |{ lv_yyyy }{ lv_mm }{ lv_dd }|.
+      CLEAR: lv_yyyy , lv_mm , lv_dd.
+
+      gv_so_h-vdatu =  lv_date_receipt.
+      CLEAR: lv_date_receipt.
+*    ENDIF.
+*End of Change sapsuppoirt2 jdiarios C-003478 04/12/2024
+    IF gv_so_h-vdatu < gv_so_h-audat. "audat is sy-datum
+      lv_error_message = |Order Date should be earlier than Delivery Date|.
+      PERFORM error_message.
+    ENDIF.
+
+    "Important Notifications -> Remarks
+    READ TABLE lt_xml_footer INTO lv_xml_footer WITH KEY row = lv_xml-row
+                                                         ftr_type = 'FOOTER_DISC_TXT'.
+    IF sy-subrc = 0.
+      lv_remarks = lv_xml_footer-importantnotification.
+      lv_sales_text-langu = sy-langu.
+      lv_sales_text-text_id = '0002'.
+      lv_sales_text-text_line = lv_remarks.
+      APPEND lv_sales_text TO lt_sales_text.
+      CLEAR: lv_sales_text.
+    ENDIF.
+
+    "Get VKORG, VTWEG, SPART abd Sold To
+    IF p_bukrs = 'NA01'.
+      READ TABLE lt_kna1_knvp INTO lv_kna1_knvp WITH KEY kunn2 = gv_so_h-shipt
+                                                         ktokd = 'Z001'
+                                                         parvw = 'WE'.
+      IF sy-subrc = 0.
+        gv_so_h-soldt = lv_kna1_knvp-kunnr.
+      ENDIF.
+
+    ELSEIF p_bukrs = 'NA02'.
+      READ TABLE lt_kna1_knvp INTO lv_kna1_knvp WITH KEY kunn2 = gv_so_h-shipt
+                                                         ktokd = 'Z005'
+                                                         parvw = 'WE'.
+      IF sy-subrc = 0.
+        gv_so_h-soldt = lv_kna1_knvp-kunnr.
+      ENDIF.
+
+    ENDIF.
+    gv_so_h-vkorg = lv_kna1_knvp-vkorg.
+    gv_so_h-vtweg = lv_kna1_knvp-vtweg.
+    gv_so_h-spart = lv_kna1_knvp-spart.
+
+    "Check duplicate PO
+    READ TABLE lt_check_po INTO lv_check_po WITH KEY bstnk = lv_xml-modified_po
+                                                     kunnr = gv_so_h-soldt.
+    IF sy-subrc <> 0.
+      lv_po_no = lv_xml-modified_po.
+      gv_so_h-bstnk = lv_po_no.
+      CLEAR: lv_po_no.
+    ELSE.
+      lv_error_message = |PO { lv_xml-modified_po } already exist|.
+      lv_display-vbeln = lv_check_po-vbeln.
+      PERFORM error_message.
+    ENDIF.
+
+"Check duplicate PO and Count Up To 100 PO Duplicate
+*      LOOP AT lt_check_po INTO lv_check_po WHERE bstnk = lv_xml-modified_po
+*                                             AND kunnr = gv_so_h-soldt.
+*        ADD 1 TO lv_count_po.
+*
+*      ENDLOOP.
+*
+*      IF lv_count_po >= 100 .
+*        LOOP AT lt_check_po INTO lv_check_po WHERE bstnk = lv_xml-modified_po
+*                                               AND kunnr = gv_so_h-soldt.
+*          lv_error_message = |PO { lv_xml-modified_po } has reached the limit ( 100 )|.
+*          lv_display-vbeln = lv_check_po-vbeln.
+*          PERFORM error_message.
+*        ENDLOOP.
+*      ENDIF.
+*
+*    CLEAR: lv_count_po.
+    PERFORM populate_bapi_header.
+
+    lv_header_level = 'X'.
+
+ENDIF.
+
+
+"-----------------------------------------------------------------------
+"Item Level
+"-----------------------------------------------------------------------
+
+    "UPC -> Item Code
+    lv_itemcode = lv_xml-upc.
+
+    IF p_bukrs = 'NA01'.
+      READ TABLE lt_zcusmat INTO lv_zcusmat WITH KEY zcsmat = lv_itemcode
+                                                     kunnr  = gv_so_h-soldt.
+      IF sy-subrc = 0.
+        lv_matnr = lv_zcusmat-matnr.
+      ELSE.
+        lv_error_message = |UPC: { lv_itemcode } and KUNNR { gv_so_h-soldt } is not maintained in ZCUSMAT|.
+        PERFORM error_message.
+      ENDIF.
+    ELSEIF p_bukrs = 'NA02'.
+      READ TABLE lt_zcusmatf INTO lv_zcusmatf WITH KEY zcsmat = lv_itemcode
+                                                       kunnr  = gv_so_h-soldt.
+      IF sy-subrc = 0.
+        lv_matnr = lv_zcusmatf-matnr.
+      ELSE.
+        lv_error_message = |UPC: { lv_itemcode } and KUNNR { gv_so_h-soldt } is not maintained in ZCUSMATF|.
+        PERFORM error_message.
+      ENDIF.
+    ENDIF.
+
+    lv_qty = lv_xml-buyqty.
+    lv_uom = lv_xml-buyum.
+*Begin of Change sapsupport2 jdiarios C-003478 04/18/2024
+*    IF lv_uom+0(1) = 'c' OR lv_uom+0(1) = 'C'.
+*        lv_uom = 'CS'.
+*    ELSEIF lv_uom+0(1) = 'p' OR lv_uom+0(1) = 'P'.
+*        lv_error_message = |UoM { lv_uom } does not exist in SAP|.
+*        PERFORM error_message.
+*        lv_uom = 'CS'. "Change to CS to avoid Standard Error but will not proceed to upload
+*    ELSE.
+*      SELECT SINGLE * FROM t006 INTO CORRESPONDING FIELDS OF ls_t006
+*        WHERE msehi = lv_uom.
+*      IF sy-subrc <> 0.
+*        lv_error_message = |UoM { lv_uom } does not exist in SAP|.
+*        PERFORM error_message.
+*        lv_uom = 'CS'. "Change to CS to avoid Standard Error but will not proceed to upload
+*      ENDIF.
+*    ENDIF.
+lv_uom = 'CS'.
+*End of Change sapsupport2 jdiarios C-003478 04/18/2024
+
+    lv_total_lineitem = lv_xml-articlecount.
+
+    PERFORM populate_bapi_item.
+
+
+    CLEAR: lv_sales_items_in, lv_sales_schedules_in.
+
+
+  ENDLOOP.
+*  ENDIF.  "lv_has_error IS INITIAL
+
+
+END-OF-SELECTION.
+  PERFORM display_error.
