@@ -1,0 +1,62 @@
+*&---------------------------------------------------------------------*
+*& Report  ZSD_ROBINSON_RTVUPLD_V1
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*   Program         :  ZSD_ROBINSON_RTVUPLD_V1
+*   Description     :  Return to Vendor Upload program for Robinson
+*
+*----------------------------------------------------------------------*
+*   Module(s)       :  SD
+*   Author          :  DXC Technology / abolival
+*   Date Created    :  02/07/2024, 03/20/2024
+*----------------------------------------------------------------------*
+*   Run Frequency      :
+*   Transaction Code   : ZSD_ROBINSON_RTV
+*   Input File Names   : CSV or XLS
+*   Output File Names  :
+*----------------------------------------------------------------------*
+*   Customized Tables  :
+*   Programs Used	     :
+*----------------------------------------------------------------------*
+* Modify/Change Log History
+*----------------------------------------------------------------------*
+* Ticket     Key   | Modified by |   Date   |      Description                 *
+*----------------------------------------------------------------------*
+* C-003667|  00001 |   abolival  | 02/07/2024 | Initial Development
+* C-003667|  00002 |   abolival  | 03/20/2024 | Initial Development
+*
+*----------------------------------------------------------------------*
+REPORT ZSD_ROBINSON_RTVUPLD_V1.
+
+INCLUDE ZSD_ROBINSON_RTVUPLD_TOP_V1.
+INCLUDE ZSD_ROBINSON_RTVUPLD_F0RM_V1.
+
+*INITIALIZATION.
+
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_path.
+  PERFORM open_file.
+
+AT SELECTION-SCREEN.
+  IF ( p_bukrs <> 'NA01' ) AND ( p_bukrs <> 'NA02' ).
+    MESSAGE text-002 TYPE 'E'.
+  ENDIF.
+
+  PERFORM get_file_extension.
+  PERFORM get_so_doctype.
+
+
+
+START-OF-SELECTION.
+
+  PERFORM get_file_contents.
+  PERFORM get_data.
+  PERFORM modify_display.
+
+
+END-OF-SELECTION.
+  PERFORM display.
