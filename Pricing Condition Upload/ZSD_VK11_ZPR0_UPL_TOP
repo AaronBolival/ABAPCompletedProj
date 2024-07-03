@@ -1,0 +1,356 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_VK11_ZPR0_UPL_TOP
+*&---------------------------------------------------------------------*
+
+"test
+TYPES: BEGIN OF ts_a995konp,
+    kappl  TYPE a995-kappl,
+    kschl  TYPE a995-kschl,
+    vkorg  TYPE a995-vkorg,
+    vtweg  TYPE a995-vtweg,
+    matnr  TYPE a995-matnr,
+    kfrst  TYPE a995-kfrst,
+    datbi  TYPE a995-datbi,
+    datab  TYPE a995-datab,
+    kbstat TYPE a995-kbstat,
+    knumh  TYPE a995-knumh,
+    konwa  TYPE konp-konwa,
+    kbetr  TYPE konp-kbetr,
+    kmein  TYPE konp-kmein,
+    kpein  TYPE konp-kpein,
+    loevm_ko  TYPE konp-loevm_ko,
+    END OF ts_a995konp.
+
+DATA: lt_a995konp TYPE TABLE OF ts_a995konp,
+      lv_a995konp TYPE ts_a995konp.
+
+TYPES: BEGIN OF ts_a985konp,
+    kappl  TYPE a985-kappl,
+    kschl  TYPE a985-kschl,
+    vkorg  TYPE a985-vkorg,
+    kunnr  TYPE a985-kunnr,
+    zzkunnr  TYPE a985-zzkunnr,
+    matnr  TYPE a985-matnr,
+    kfrst  TYPE a985-kfrst,
+    datbi  TYPE a985-datbi,
+    datab  TYPE a985-datab,
+    kbstat TYPE a985-kbstat,
+    knumh  TYPE a985-knumh,
+    konwa  TYPE konp-konwa,
+    kbetr  TYPE konp-kbetr,
+    kmein  TYPE konp-kmein,
+    kpein  TYPE konp-kpein,
+    loevm_ko  TYPE konp-loevm_ko,
+    END OF ts_a985konp.
+
+DATA: lt_a985konp TYPE TABLE OF ts_a985konp,
+      lv_a985konp TYPE ts_a985konp.
+
+
+TYPES: BEGIN OF ts_a910konp,
+    kappl  TYPE a910-kappl,
+    kschl  TYPE a910-kschl,
+    vkorg  TYPE a910-vkorg,
+    kunnr  TYPE a910-kunnr,
+    matnr  TYPE a910-matnr,
+    datbi  TYPE a910-datbi,
+    datab  TYPE a910-datab,
+    knumh  TYPE a910-knumh,
+    konwa  TYPE konp-konwa,
+    kbetr  TYPE konp-kbetr,
+    kmein  TYPE konp-kmein,
+    kpein  TYPE konp-kpein,
+    loevm_ko  TYPE konp-loevm_ko,
+    END OF ts_a910konp.
+
+DATA: lt_a910konp TYPE TABLE OF ts_a910konp,
+      lv_a910konp TYPE ts_a910konp.
+
+
+TYPES: BEGIN OF ts_a911konp,
+    kappl  TYPE a911-kappl,
+    kschl  TYPE a911-kschl,
+    vkorg  TYPE a911-vkorg,
+    konda  TYPE a911-konda,
+    matnr  TYPE a911-matnr,
+    kfrst  TYPE a911-kfrst,
+    datbi  TYPE a911-datbi,
+    datab  TYPE a911-datab,
+    kbstat TYPE a911-kbstat,
+    knumh  TYPE a911-knumh,
+    konwa  TYPE konp-konwa,
+    kbetr  TYPE konp-kbetr,
+    kmein  TYPE konp-kmein,
+    kpein  TYPE konp-kpein,
+    loevm_ko  TYPE konp-loevm_ko,
+    END OF ts_a911konp.
+
+DATA: lt_a911konp TYPE TABLE OF ts_a911konp,
+      lv_a911konp TYPE ts_a911konp.
+
+
+TYPES: BEGIN OF ts_a907konp,
+    kappl  TYPE a907-kappl,
+    kschl  TYPE a907-kschl,
+    vkorg  TYPE a907-vkorg,
+    matnr  TYPE a907-matnr,
+    kfrst  TYPE a907-kfrst,
+    datbi  TYPE a907-datbi,
+    datab  TYPE a907-datab,
+    kbstat TYPE a907-kbstat,
+    knumh  TYPE a907-knumh,
+    konwa  TYPE konp-konwa,
+    kbetr  TYPE konp-kbetr,
+    kmein  TYPE konp-kmein,
+    kpein  TYPE konp-kpein,
+    loevm_ko  TYPE konp-loevm_ko,
+    END OF ts_a907konp.
+
+DATA: lt_a907konp TYPE TABLE OF ts_a907konp,
+      lv_a907konp TYPE ts_a907konp.
+
+TYPES: BEGIN OF ts_axxx_final,
+    kappl TYPE kappl,
+    kschl TYPE kschl,
+    vkorg TYPE vkorg,
+    vtweg TYPE vtweg,
+    matnr TYPE matnr,
+    kfrst TYPE kfrst,
+    datbi TYPE datbi,
+    datab TYPE datab,
+    kbstat TYPE kbstat,
+    knumh TYPE knumh,
+    konwa TYPE konwa,
+    kbetr TYPE kbetr,
+    kmein TYPE kmein,
+    kpein TYPE kpein,
+    kunnr TYPE kunnr,
+    zzkunnr  TYPE a985-zzkunnr,
+    konda TYPE konda,
+    loevm_ko  TYPE loevm_ko,
+END OF ts_axxx_final.
+
+DATA: lt_axxx_final TYPE TABLE OF ts_axxx_final,
+      lv_axxx_final TYPE ts_axxx_final.
+
+FIELD-SYMBOLS: <fs_axxx_final> TYPE ts_axxx_final,
+               <fs_a995konp> TYPE ts_a995konp.
+
+
+
+FIELD-SYMBOLS: <fs_dbykonh> TYPE konhdb,
+               <fs_dbykonp> TYPE konpdb,
+               <fs_dbxkonh> TYPE konhdb,
+               <fs_dbxkonp> TYPE konpdb,
+               <fs_dbykondat> TYPE vkondat,
+               <fs_dbxkondat> TYPE vkondat.
+DATA: db_xkondat TYPE TABLE OF vkondat,
+      db_ykondat TYPE TABLE OF vkondat,
+      db_xkonh   TYPE TABLE OF konhdb,
+      db_ykonh   TYPE TABLE OF konhdb,
+      db_xkonp   TYPE TABLE OF konpdb,
+      db_ykonp   TYPE TABLE OF konpdb,
+      db_xkonm   TYPE TABLE OF vkonm,
+      db_xkonw   TYPE TABLE OF vkonw,
+      db_ykonm   TYPE TABLE OF vkonm,
+      db_ykonw   TYPE TABLE OF vkonw.
+
+DATA: lv_db_xkondat TYPE vkondat,
+      lv_db_ykondat TYPE vkondat,
+      lv_db_xkonh   TYPE konhdb,
+      lv_db_ykonh   TYPE konhdb,
+      lv_db_xkonp   TYPE konpdb,
+      lv_db_ykonp   TYPE konpdb,
+      lv_db_xkonm   TYPE vkonm,
+      lv_db_xkonw   TYPE vkonw,
+      lv_db_ykonm   TYPE vkonm,
+      lv_db_ykonw   TYPE vkonw.
+"end test
+
+DATA: lv_filename TYPE localfile.
+*DATA: lv_path_length TYPE i.
+DATA: lt_filetable TYPE filetable,
+      lv_filetable LIKE LINE OF lt_filetable,
+      lv_rc TYPE i.
+
+"XLSX
+DATA: lv_localfile TYPE localfile.
+DATA: lt_raw TYPE truxs_t_text_data.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"For getting extension
+DATA: lv_path_c TYPE c LENGTH 1024,
+      lv_path_extension TYPE c LENGTH 10.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+DATA: lt_uploaded_contents TYPE TABLE OF kcde_intern_struc,
+      lv_uploaded_contents LIKE LINE OF lt_uploaded_contents,
+      lv_index TYPE i.
+FIELD-SYMBOLS: <fs_uploaded_contents>.
+
+TYPES: BEGIN OF ts_contents,
+          col1  TYPE string, "B KSCHL    Pricing Condition      C4
+*          col2  TYPE string, "C SELKZ05  Key Combination        C1
+*          col3  TYPE string, "D SELKZ04  Key Combination        C1
+*          col4  TYPE string, "E SELKZ03  Key Combination        C1
+*          col5  TYPE string, "F SELKZ02  Key Combination        C1
+*          col6  TYPE string, "G SELKZ01  Key Combination        C1
+          col7  TYPE string, "H VKORG    Sales Organization     N4
+          col8  TYPE string, "I VTWEG    Distribution Channel   N2
+          col9  TYPE string, "J KUNNR    Customer               C10
+          col10 TYPE string, "K KUNWE    Ship To                C10
+          col11 TYPE string, "L KONDA    Price Group            C2
+          col12 TYPE string, "M MATNR    Material               C18
+          col13 TYPE string, "N DATAB    Valid From             DMDY10
+          col14 TYPE string, "O DATBI    Valid To               DMDY10
+          col15 TYPE string, "P KRECH    CalcType               C1
+          col16 TYPE string, "Q KBETR    Condition Amount       N11
+          col17 TYPE string, "R KONWA    Currency               C5
+          col18 TYPE string, "S KPEIN    Per                    C5
+          col19 TYPE string, "T KMEIN    Unit                   C5
+*          col20 TYPE string, "U KNUMH    Condition Record Number
+       END OF ts_contents.
+
+
+DATA: lt_file_contents TYPE TABLE OF ts_contents,
+      lv_file_contents TYPE ts_contents.
+DATA: lt_file_contents_2 TYPE TABLE OF ts_contents,
+      lv_file_contents_2 TYPE ts_contents.
+FIELD-SYMBOLS: <fs_file_contents> TYPE any.
+
+"for checking
+DATA: lt_file_contents_check TYPE TABLE OF ts_contents,
+      lv_file_contents_check TYPE ts_contents.
+DATA: lv_key_combination_check TYPE bapicondct-table_no.
+
+DATA: lv_pricegroup_tbl_check TYPE t188,
+      lt_pricegroup_tbl_check TYPE TABLE OF t188,
+      lv_tcurc_check TYPE tcurc-waers,
+      lv_msehi_check TYPE t006-msehi,
+      lt_vkorg_check TYPE TABLE OF tvko,
+      lv_vkorg_check TYPE tvko,
+      lt_vtweg_check TYPE TABLE OF tvtw,
+      lv_vtweg_check TYPE tvtw,
+      lv_knumh_check TYPE knumh.
+"
+
+DATA: lv_header TYPE c,
+      lv_header_bapicondct TYPE c.
+DATA: lv_header_template TYPE ts_contents,
+      lv_header_template_check TYPE ts_contents.
+
+
+TYPES: BEGIN OF ts_display,
+       col1_icon TYPE c LENGTH 4,         "Status
+       col2_row TYPE i,                   "Row
+       col_cond_tbl TYPE string,
+       col3_message TYPE string,           "Message
+       END OF ts_display.
+
+DATA: lt_display TYPE TABLE OF ts_display,
+      lv_display TYPE ts_display.
+
+DATA: lv_tabix TYPE sy-tabix.
+
+DATA: lv_a995_duplicate TYPE a995,
+      lv_a985_duplicate TYPE a985,
+      lv_a910_duplicate TYPE a910,
+      lv_a911_duplicate TYPE a911,
+      lv_a907_duplicate TYPE a907.
+"BAPI Variables
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+DATA: lt_bapicondct TYPE TABLE OF bapicondct,
+      lv_bapicondct LIKE LINE OF lt_bapicondct,
+      lt_bapicondhd TYPE TABLE OF bapicondhd,
+      lv_bapicondhd LIKE LINE OF lt_bapicondhd,
+      lt_bapicondit TYPE TABLE OF bapicondit,
+      lv_bapicondit LIKE LINE OF lt_bapicondit,
+      lt_bapicondqs TYPE TABLE OF bapicondqs,
+      lv_bapicondqs LIKE LINE OF lt_bapicondqs,
+      lt_bapicondvs TYPE TABLE OF bapicondvs,
+      lv_bapicondvs LIKE LINE OF lt_bapicondvs,
+      lt_bapiret2   TYPE TABLE OF bapiret2,
+      lv_bapiret2   LIKE LINE OF lt_bapiret2,
+      lt_bapiknumhs TYPE TABLE OF bapiknumhs,
+      lv_bapiknumhs LIKE LINE OF lt_bapiknumhs,
+      lt_cnd_mem_initial TYPE TABLE OF cnd_mem_initial,
+      lv_cnd_mem_initial LIKE LINE OF lt_cnd_mem_initial.
+
+FIELD-SYMBOLS: <fs_bapiret2> TYPE bapiret2.
+DATA: lv_commit_bapiret2 TYPE bapiret2.
+DATA: lv_operation TYPE msgfn,
+      lv_del TYPE c,
+      lv_final_create_009 TYPE c,
+      lv_knumh_saved TYPE knumh,
+      lv_gele_check TYPE c,
+      lv_gtgele_check TYPE c.
+
+DATA: lv_modif_and_add TYPE c. "dxcsupport1 abolival C-003462,  DD/MM/YYYY = 13.11.2023 17:23:21
+
+DATA: lv_delete_indicator TYPE konp-loevm_ko.
+
+"Convert
+DATA: lv_key_combination TYPE bapicondct-table_no ."kotabnr.
+
+DATA: lv_validfrom TYPE sy-datum,
+      lv_validto TYPE sy-datum,
+      lv_date_rotate_to_datum(8).
+
+DATA: lv_dd(2),lv_mm(2),lv_yyyy(4),
+      lv_date_with_zero(2).
+
+DATA:
+      lv_pricecondtype TYPE bapicondct-cond_type, "KSCHL Pricing Condition
+      lv_vkorg TYPE vkorg, "Sales Org
+      lv_vtweg TYPE vtweg, "Distribution Channel
+      lv_kunnr TYPE kunnr,  "Customer
+      lv_shipto TYPE kunwe, "Ship To
+      lv_konda TYPE konda, "Price Group
+      lv_matnr TYPE matnr, " Material
+      lv_calctype TYPE bapicondit-calctypcon, "Calculation Type
+      lv_valuekbetr TYPE kbetr, "Condition Amount Value
+      lv_currency_konwa  TYPE konwa,  "Currency  bapicondit-condcurr
+      lv_file_contents_ctype TYPE c, "for kpein
+      lv_kpein TYPE kpein, "Per bapicondit-cond_p_unt,
+      lv_unitkmein TYPE kmein, " Unit like CAS
+      lv_knumh TYPE knumh,
+      lv_kbstat TYPE kbstat,
+      lv_kfrst TYPE kfrst
+      .
+TYPES: BEGIN OF ts_kunnr,
+       kunnr TYPE kna1-kunnr,
+       END OF ts_kunnr.
+TYPES: BEGIN OF ts_matnr,
+       matnr TYPE mara-matnr,
+       END OF ts_matnr.
+DATA: lt_kunnr_check_temp TYPE TABLE OF ts_kunnr,
+      lv_kunnr_check_temp TYPE ts_kunnr,
+      lv_kunnr_check TYPE ts_kunnr,
+      lt_kunnr_check TYPE TABLE OF ts_kunnr,
+      lt_matnr_check TYPE TABLE OF ts_matnr,
+      lv_matnr_check TYPE ts_matnr,
+      lt_matnr_check_temp TYPE TABLE OF ts_matnr,
+      lv_matnr_check_temp TYPE ts_matnr.
+
+DATA: lv_count TYPE i.
+
+DATA: lv_finalvarkey_ct TYPE bapicondct-varkey,
+      lv_finalvarkey_hd TYPE bapicondhd-varkey.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+DATA: lv_count_contents TYPE i.
+
+DATA lv_string_out TYPE string.
+DATA lv_htype TYPE datatype_d.
+
+
+DATA: lv_error_message TYPE string,
+      lv_iserror TYPE c,
+      lv_haserror TYPE c,
+      lv_hasoverlap TYPE c,
+      lv_error_template TYPE c,
+      lv_seterror_duplicate_add TYPE c,
+      lv_seterror_duplicate_change TYPE c.
+
+DATA: lo_salv TYPE REF TO cl_salv_table,
+      lo_columns TYPE REF TO cl_salv_columns_table,
+      lo_column TYPE REF TO cl_salv_column.
