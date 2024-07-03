@@ -1,0 +1,612 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_SMUPLOAD_FORM
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  IMPORT_XML
+*&---------------------------------------------------------------------*
+FORM import_xml .
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  APPEND_HEADER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM append_header .
+      lv_xml-documenttype = 'DocumentType'.
+      lv_xml-companyname = 'CompanyName'.
+      lv_xml-postdate = 'PostDate'.
+      lv_xml-posttime = 'PostTime'.
+      lv_xml-vendorname = 'VendorName'.
+      lv_xml-vendorcode = 'VendorCode'.
+      lv_xml-termsdiscount = 'TermsDiscount'.
+      lv_xml-sitecode = 'SiteCode'.
+      lv_xml-sitename = 'SiteName'.
+      lv_xml-siteaddress = 'SiteAddress'.
+      lv_xml-sitetin = 'SiteTIN'.
+      lv_xml-documentnumber = 'DcumentNumber'.
+      lv_xml-dateentry = 'DateEntry'.
+      lv_xml-datecancel = 'DateCancel'.
+      lv_xml-datereceipt = 'DateReceipt'.
+      lv_xml-articlecount = 'ArticleCount'.
+      lv_xml-deliverymessage = 'DeliveryMessage'.
+      lv_xml-linenumber = 'LineNumber'.
+      lv_xml-skumatcode = 'SKUMatCode'.
+      lv_xml-description = 'Description'.
+      lv_xml-upc = 'UPC'.
+      lv_xml-buyqty = 'BuyQTY'.
+      lv_xml-buycost = 'BuyCost'.
+      lv_xml-buyum = 'BuyUM'.
+      lv_xml-package = 'Package'.
+      lv_xml-sellum = 'SellUM'.
+      lv_xml-ppsitecode = 'ppsitecode'.
+      lv_xml-ppqty = 'ppqty'.
+      lv_xml-ppunit = 'ppunit'.
+      lv_xml-totalamount = 'TotalAmount'.
+      lv_xml-importantnotification = 'ImportantNotification'.
+
+      APPEND lv_xml TO lt_xml.
+      CLEAR lv_xml.
+
+       DELETE lt_xml INDEX 1.
+ENDFORM.                    " APPEND_HEADER
+*&---------------------------------------------------------------------*
+*&      Form  XML_TO_ITAB
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM xml_to_itab .
+  CREATE OBJECT lo_gcl_xml.
+
+  CALL METHOD lo_gcl_xml->import_from_file
+    EXPORTING
+      filename = p_upl
+    RECEIVING
+      retcode  = lv_ret.
+
+  IF sy-subrc = 0.
+
+    CALL METHOD lo_gcl_xml->render_2_xstring
+*    EXPORTING
+*      pretty_print = 'X'    " Format Output
+      IMPORTING
+        retcode      =  lv_rend_rc " Return Code
+        stream       =  lv_rend_stream   " XString (STREAM)
+        size         =  lv_rend_size   " Number of characters
+      .
+
+    IF lv_rend_rc = 0.
+      CALL FUNCTION  'ZSMUM_XML_PARSE' " Copy of SMUM_XML_PARSE with addtional 1 line of code to read the CDATA in XML
+        EXPORTING
+          xml_input = lv_rend_stream
+        TABLES
+          xml_table = lt_smum
+          return    = lt_ret
+        .
+
+      PERFORM append_header.
+
+      lv_tabix_header = 0.
+
+      LOOP AT lt_smum INTO lv_smum.
+        CONDENSE: lv_smum-cvalue.
+
+        IF lv_smum-cname = 'document'.
+          CLEAR: lv_xml, lv_count_ftr_child .
+          lv_tabix_header = lv_tabix_header + 1.
+          lv_xml-row = lv_tabix_header.
+        ENDIF.
+
+        CASE lv_smum-cname.
+"Header
+          WHEN 'DocumentType'.
+            lv_xml-documenttype  = lv_smum-cvalue.
+          WHEN 'CompanyName'.
+            lv_xml-companyname  = lv_smum-cvalue.
+          WHEN 'PostDate'.
+            lv_xml-postdate  = lv_smum-cvalue.
+          WHEN 'PostTime'.
+            lv_xml-posttime  = lv_smum-cvalue.
+          WHEN 'VendorName'.
+            lv_xml-vendorname  = lv_smum-cvalue.
+          WHEN 'VendorCode'.
+            lv_xml-vendorcode  = lv_smum-cvalue.
+          WHEN 'TermsDiscount'.
+            lv_xml-termsdiscount  = lv_smum-cvalue.
+          WHEN 'SiteCode'.
+
+            lv_xml-sitecode  = lv_smum-cvalue.
+*
+*            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+*              EXPORTING
+*                input  =    lv_xml-sitecode
+*              IMPORTING
+*                output =    lv_xml-sitecode
+*              .
+
+
+          WHEN 'SiteName'.
+            lv_xml-sitename = lv_smum-cvalue.
+          WHEN 'SiteAddress'.
+            lv_xml-siteaddress = lv_smum-cvalue.
+          WHEN 'SiteTIN'.
+            lv_xml-sitetin = lv_smum-cvalue.
+          WHEN 'DocumentNumber'.
+            lv_xml-documentnumber = lv_smum-cvalue.
+          WHEN 'DateEntry'.
+            lv_xml-dateentry = lv_smum-cvalue.
+          WHEN 'DateCancel'.
+            lv_xml-datecancel = lv_smum-cvalue.
+          WHEN 'DateReceipt'.
+            lv_xml-datereceipt = lv_smum-cvalue.
+          WHEN 'ArticleCount'.
+            CONDENSE lv_smum-cvalue NO-GAPS.
+            lv_xml-articlecount = lv_smum-cvalue.
+          WHEN 'DeliveryMessage'.
+            lv_xml-deliverymessage = lv_smum-cvalue.
+"Body
+*          WHEN 'article'.
+*            IF lv_xml-col20 IS INITIAl.
+*              lv_count_article = lv_count_article + 1.
+*            ELSE.
+*              APPEND lv_xml TO lt_xml.
+*            ENDIF.
+          WHEN 'LineNumber'.
+            CONDENSE lv_smum-cvalue NO-GAPS.
+            lv_xml-linenumber = lv_smum-cvalue.
+          WHEN 'SKUMatCode'.
+            lv_xml-skumatcode = lv_smum-cvalue.
+*          WHEN 'ArticleDescription'.
+          "ArticleDescription Child -> Description
+          WHEN 'Description'.
+            lv_xml-description = lv_smum-cvalue.
+          WHEN 'UPC'. "Or Discount
+            lv_xml-upc = lv_smum-cvalue.
+          WHEN 'BuyQty'.
+            lv_xml-buyqty = lv_smum-cvalue.
+          WHEN 'BuyCost'.
+            lv_xml-buycost = lv_smum-cvalue.
+          WHEN 'BuyUM'.
+            lv_xml-buyum = lv_smum-cvalue.
+          WHEN 'ppsitecode'.
+            lv_xml-ppsitecode = lv_smum-cvalue.
+          WHEN 'ppqty'.
+            lv_xml-ppqty = lv_smum-cvalue.
+          WHEN 'ppunit'.
+            lv_xml-ppunit = lv_smum-cvalue.
+          WHEN 'Package'.
+            lv_xml-package = lv_smum-cvalue.
+          WHEN 'SellUM'.
+            lv_xml-sellum = lv_smum-cvalue.
+            APPEND lv_xml TO lt_xml.
+"Footer
+          WHEN 'footer'.
+            CLEAR: lv_xml-documenttype,lv_xml-companyname,lv_xml-postdate,lv_xml-posttime,lv_xml-vendorname,lv_xml-vendorcode,lv_xml-termsdiscount,lv_xml-sitecode,
+                   lv_xml-sitename,
+                   lv_xml-siteaddress,lv_xml-sitetin,lv_xml-documentnumber,lv_xml-dateentry,lv_xml-datecancel,lv_xml-datereceipt,lv_xml-articlecount,lv_xml-deliverymessage,lv_xml-linenumber,
+                   lv_xml-skumatcode,lv_xml-description,lv_xml-upc,lv_xml-buyqty,lv_xml-buycost,lv_xml-buyum,lv_xml-package,lv_xml-sellum.
+          WHEN 'TotalAmount'.
+            lv_xml-totalamount = lv_smum-cvalue.
+
+            IF lv_count_ftr_child = 0.
+              lv_xml-ftr_type = 'FOOTER_DISC_TXT'.
+              lv_count_ftr_child = lv_count_ftr_child + 1.
+            ELSEIF lv_count_ftr_child > 0.
+              lv_xml-ftr_type = 'FOOTER_TOTAL_AMT'.
+            ENDIF.
+            APPEND lv_xml TO lt_xml.
+          WHEN 'ImportantNotification'.
+            lv_xml-importantnotification = lv_smum-cvalue.
+
+            READ TABLE lt_xml ASSIGNING <fs_xml> WITH KEY ftr_type = 'FOOTER_DISC_TXT'
+                                                          row     =  lv_tabix_header .
+            IF sy-subrc = 0.
+              <fs_xml>-importantnotification = lv_xml-importantnotification.
+            ENDIF.
+
+            READ TABLE lt_xml ASSIGNING <fs_xml> WITH KEY ftr_type = 'FOOTER_TOTAL_AMT'
+                                                          row     =  lv_tabix_header .
+            IF sy-subrc = 0.
+              <fs_xml>-importantnotification = lv_xml-importantnotification.
+            ENDIF.
+
+            UNASSIGN <fs_xml>.
+
+          WHEN OTHERS.
+
+        ENDCASE.
+
+      ENDLOOP.
+
+    ENDIF.
+    "Limit to 100 records only
+    DELETE lt_xml WHERE row > 100.
+
+    "Get the total amount and remarks
+    LOOP AT lt_xml INTO lv_xml_footer WHERE ( ftr_type = 'FOOTER_DISC_TXT' OR ftr_type = 'FOOTER_TOTAL_AMT' ).
+      APPEND lv_xml_footer TO lt_xml_footer.
+    ENDLOOP.
+    CLEAR: lv_xml_footer.
+
+    DELETE lt_xml WHERE ftr_type = 'FOOTER_DISC_TXT' OR ftr_type = 'FOOTER_TOTAL_AMT' .
+  ENDIF.
+
+  REFRESH: lt_smum.
+ENDFORM.                    " XML_TO_ITAB
+*&---------------------------------------------------------------------*
+*&      Form  OPEN_FILE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM open_file .
+  lv_path_str = p_upl.
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+      window_title      = 'Open XML File'
+*      default_filename  = lv_path_str
+    CHANGING
+      file_table        = lt_filetable
+      rc                = lv_rc
+    EXCEPTIONS
+      file_open_dialog_failed = 1
+      cntl_error              = 2
+      error_no_gui            = 3
+      not_supported_by_gui    = 4
+      others                  = 5
+    .
+
+  READ TABLE lt_filetable INTO lv_filetable INDEX 1.
+  IF sy-subrc = 0.
+    p_upl = lv_filetable.
+    lv_filename = lv_filetable.
+*  ELSE.
+*    MESSAGE 'Error: please upload the file' TYPE 'E'.
+  ENDIF.
+ENDFORM.                    " OPEN_FILE
+*&---------------------------------------------------------------------*
+*&      Form  GET_FILE_EXTENSION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_file_extension .
+  CALL FUNCTION 'TRINT_FILE_GET_EXTENSION'
+    EXPORTING
+      filename  = lv_filename
+     uppercase = 'X'
+    IMPORTING
+      extension = lv_extension.
+
+  IF lv_extension IS INITIAL.
+    lv_error_message = |Error: File extension must be XML|.
+    MESSAGE lv_error_message TYPE 'E'.
+  ELSEIF ( lv_extension <> 'XML' AND lv_extension <> 'XLSX' ).
+    lv_error_message = |Error: File extension { lv_extension } is not allowed|.
+    MESSAGE lv_error_message TYPE 'E'.
+  ENDIF.
+ENDFORM.                    " GET_FILE_EXTENSION
+*&---------------------------------------------------------------------*
+*&      Form  XLSX_TO_ITAB
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM xlsx_to_itab .
+  lv_localfile = lv_filename.
+  CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+    EXPORTING
+*      i_field_seperator    =
+      i_line_header        = ' '
+      i_tab_raw_data       = lt_truxs_t_text_data
+      i_filename           = lv_localfile
+    TABLES
+      i_tab_converted_data = lt_xml
+    EXCEPTIONS
+      conversion_failed    = 1
+      others               = 2
+    .
+ENDFORM.                    " XLSX_TO_ITAB
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_ERROR
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display_error .
+
+
+  LOOP AT lt_display INTO lv_display.
+    IF lv_display-row < 1.
+         lv_display2-row = space.
+    ELSE.
+         lv_display2-row = lv_display-row.
+    ENDIF.
+
+         lv_display2-icon = lv_display-icon.
+         lv_display2-vbeln = lv_display-vbeln.
+         lv_display2-message = lv_display-message.
+
+    APPEND lv_display2 TO lt_display2.
+    CLEAR: lv_display2, lv_display.
+  ENDLOOP.
+  REFRESH: lt_display.
+
+  CALL METHOD cl_salv_table=>factory
+    EXPORTING
+      list_display   = IF_SALV_C_BOOL_SAP=>TRUE
+    IMPORTING
+      r_salv_table   =  lo_salv_table
+    CHANGING
+      t_table        = lt_display2
+    .
+    lo_columns = lo_salv_table->get_columns( ).
+    lo_column = lo_columns->get_column( 'ROW' ).
+    lo_column->set_short_text( 'Row' ).
+    lo_column->set_medium_text( 'Row' ).
+    lo_column->set_long_text( 'Row' ).
+
+    lo_column = lo_columns->get_column( 'ICON' ).
+    lo_column->set_short_text( 'Status' ).
+    lo_column->set_medium_text( 'Status' ).
+    lo_column->set_long_text( 'Status' ).
+
+    lo_column = lo_columns->get_column( 'VBELN' ).
+    lo_column->set_short_text( 'SO No.' ).
+    lo_column->set_medium_text( 'Sales Order No.' ).
+    lo_column->set_long_text( 'Sales Order No.' ).
+
+
+    lo_column = lo_columns->get_column( 'MESSAGE' ).
+    lo_column->set_short_text( 'Details' ).
+    lo_column->set_medium_text( 'Details' ).
+    lo_column->set_long_text( 'Details' ).
+
+*    lo_column = lo_columns->get_column( 'ERR_LOC' ).
+*    lo_column->set_short_text( 'ErrLoc' ).
+*    lo_column->set_medium_text( 'Error Location' ).
+*    lo_column->set_long_text( 'Error Location' ).
+
+    lo_columns->set_optimize(  ).
+
+    lo_salv_table->display( ).
+ENDFORM.                    " DISPLAY_ERROR
+*&---------------------------------------------------------------------*
+*&      Form  ERROR_MESSAGE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM error_message .
+
+lv_display-icon = icon_red_light.
+
+IF lv_success = 'X'.
+lv_display-icon = icon_green_light.
+CLEAR: lv_success.
+ENDIF.
+
+lv_display-row = lv_xml-row.
+lv_display-message = lv_error_message.
+APPEND lv_display TO lt_display.
+CLEAR: lv_display,lv_error_message.
+
+IF lv_success <> 'X'.
+lv_has_error = 'X'.
+ENDIF.
+ENDFORM.                    " ERROR_MESSAGE
+*&---------------------------------------------------------------------*
+*&      Form  CREATE_SALES_ORDER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM create_sales_order .
+*Begin of Change Sapsupport2 jdiarios C-003478 06/03/2024
+IF gv_zdr = 'X'.
+ CALL FUNCTION 'SD_SALESDOCUMENT_CREATE'
+    EXPORTING
+*      salesdocument           =     " Sales and Distribution Document Number (Optional)
+      sales_header_in         = lv_sales_header_in
+      business_object         = 'BUS2096'
+      testrun                 = lv_testrun
+    IMPORTING
+      salesdocument_ex        = lv_salesdocument_ex
+    TABLES
+      return                  = lt_return
+      sales_items_in          = lt_sales_items_in
+      sales_partners          = lt_sales_partners
+      sales_schedules_in      = lt_sales_schedules_in "-sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 22.04.2024  remove
+      sales_text              = lt_sales_text
+    .
+ELSE.
+  "original
+  CALL FUNCTION 'SD_SALESDOCUMENT_CREATE'
+    EXPORTING
+*      salesdocument           =     " Sales and Distribution Document Number (Optional)
+      sales_header_in         = lv_sales_header_in
+*      business_object         = SPACE
+      testrun                 = lv_testrun
+    IMPORTING
+      salesdocument_ex        = lv_salesdocument_ex
+    TABLES
+      return                  = lt_return
+      sales_items_in          = lt_sales_items_in
+      sales_partners          = lt_sales_partners
+      sales_schedules_in      = lt_sales_schedules_in "-sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 22.04.2024  remove
+      sales_text              = lt_sales_text
+    .
+ "End of original
+ENDIF.
+*End of Change Sapsupport2 jdiarios C-003478 06/03/2024
+
+
+  IF lv_salesdocument_ex <> space AND lv_testrun <> 'X'.
+
+*    COMMIT WORK.
+
+    "+sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 22.04.2024
+    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+*      EXPORTING
+*        wait   =     " Using the command `COMMIT AND WAIT`
+*      IMPORTING
+*        return =     " Return Messages
+      .
+
+
+
+    lv_check_po-vbeln = lv_salesdocument_ex.
+    lv_check_po-bstnk = lv_sales_header_in-purch_no_c.
+    APPEND lv_check_po TO lt_check_po.
+    CLEAR: lv_check_po.
+
+
+    "start of change dxcsupport1 abolival C-003478,  -03.11.2023 | Try to use this if encountered an performance issue |
+    "Option 1: after successful post  -> check vbak/vbkd using the vbeln from lv_salesdocument_ex <> VBAK-VBELN but same PO# -> if encountered a duplicate PO# delete the created sales order
+    "Option 2: Same with option 1 but create an ITAB if not INITIAL means the ITAB contains duplicate PO in this case Created Sales document should be deleted.
+
+    "end of change
+
+    lv_error_message = |Order { lv_salesdocument_ex } has been created |.
+    lv_display-vbeln = lv_salesdocument_ex.
+    lv_success = 'X'.
+    PERFORM error_message.
+  ELSEIF lv_salesdocument_ex = space AND lv_testrun = 'X'.
+*    READ TABLE lt_return INTO lv_return WITH KEY type = 'E'.
+*    IF sy-subrc = 0.
+*      lv_error_message = |Upload Failed|.
+*      PERFORM error_message.
+*    ELSE.
+*      lv_error_message = |Ready to Upload |.
+*      lv_success = 'X'.
+*      PERFORM error_message.
+*    ENDIF.
+
+    READ TABLE lt_return INTO lv_return WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      LOOP AT lt_return INTO lv_return WHERE type = 'E'.
+        lv_error_message = |Upload Failed { lv_return-message }|.
+*        IF lv_return-id = 'V1' AND lv_return-number = '384'.
+*          lv_error_message = |Upload Failed Sales unit { lv_uom } is not defined for item { lv_return-message_v2 }|.
+*        ENDIF.
+        PERFORM error_message.
+      ENDLOOP.
+    ELSE.
+      lv_error_message = |Ready to Upload |.
+      lv_success = 'X'.
+      PERFORM error_message.
+    ENDIF.
+
+  ELSE.
+*    lv_error_message = |Upload failed|.
+*    PERFORM error_message.
+    READ TABLE lt_return INTO lv_return WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      LOOP AT lt_return INTO lv_return WHERE type = 'E'.
+        lv_error_message = |Upload Failed { lv_return-message }|.
+*        IF lv_return-id = 'V1' AND lv_return-number = '384'.
+*          lv_error_message = |Upload Failed Sales unit { lv_uom } is not defined for item { lv_return-message_v2 }|.
+*        ENDIF.
+        PERFORM error_message.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+
+  CLEAR: lv_sales_header_in, lv_salesdocument_ex, lt_return, lt_sales_items_in,lt_sales_partners,lt_sales_schedules_in,lt_sales_text,gv_zdr.
+ENDFORM.                    " CREATE_SALES_ORDER
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_BAPI_HEADER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_bapi_header .
+    lv_sales_header_in-doc_type = gv_so_h-auart.
+    lv_sales_header_in-price_date = sy-datum.
+    lv_sales_header_in-sales_org = gv_so_h-vkorg.
+    lv_sales_header_in-distr_chan = gv_so_h-vtweg.
+    lv_sales_header_in-division = gv_so_h-spart.
+*    IF gv_zor IS NOT INITIAL.  "+sapsupport2 jdiarios C-003478 04/16/2024
+     lv_sales_header_in-req_date_h = gv_so_h-vdatu. "RDD
+*    ENDIF.                     "+sapsupport2 jdiarios C-003478 04/16/2024
+    lv_sales_header_in-doc_date = gv_so_h-audat.   "Document Date
+    lv_sales_header_in-purch_no_c = gv_so_h-bstnk. "PO Number
+    lv_sales_header_in-dun_date = gv_so_h-mahdt.   "Last Contact Date
+
+    CLEAR: lv_sales_partners.
+    lv_sales_partners-partn_role = 'WE'.
+    lv_sales_partners-partn_numb = gv_so_h-shipt.
+    APPEND lv_sales_partners TO lt_sales_partners.
+
+    CLEAR: lv_sales_partners.
+    lv_sales_partners-partn_role = 'AG'.
+    lv_sales_partners-partn_numb = gv_so_h-soldt.
+    APPEND lv_sales_partners TO lt_sales_partners.
+ENDFORM.                    " POPULATE_BAPI_HEADER
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_BAPI_ITEM
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_bapi_item .
+    IF lv_total_lineitem >= lv_article_count.
+      lv_article_count = lv_article_count + 1.
+
+      lv_posnr = lv_posnr + 10.
+
+      lv_sales_items_in-itm_number = lv_posnr .
+      lv_sales_items_in-sales_unit = lv_uom.
+      lv_sales_items_in-material   = lv_matnr.
+      lv_sales_items_in-plant      = lv_werks.
+      IF gv_zdr = 'X'.
+      lv_sales_items_in-target_qty = lv_qty.
+      ENDIF.
+
+      APPEND lv_sales_items_in TO lt_sales_items_in.
+
+      "+sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 22.04.2024
+      lv_sales_schedules_in-itm_number = lv_posnr.
+      lv_sales_schedules_in-req_date   = gv_so_h-vdatu.
+      lv_sales_schedules_in-req_qty    = lv_qty.
+
+      APPEND lv_sales_schedules_in TO lt_sales_schedules_in.
+      "-end
+
+      CLEAR: lv_sales_items_in, lv_sales_schedules_in.
+      CLEAR: lv_qty,  lv_matnr, lv_uom. "lv_werks ,lv_uom.
+
+    IF lv_total_lineitem = lv_article_count.
+      CLEAR: lv_article_count, lv_posnr, lv_total_lineitem.
+      CLEAR: lv_header_level.
+      IF lv_has_error IS INITIAL.
+      PERFORM create_sales_order.
+      ENDIF.
+
+      CLEAR: lv_has_error.
+    ENDIF.
+
+    ENDIF.
+ENDFORM.                    " POPULATE_BAPI_ITEM
