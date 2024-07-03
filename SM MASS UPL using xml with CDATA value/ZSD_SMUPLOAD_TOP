@@ -1,0 +1,273 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_SMUPLOAD_TOP
+*&---------------------------------------------------------------------*
+
+      "-----------------------------------------------------------------------
+      SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME.
+      PARAMETERS: p_bukrs TYPE bukrs DEFAULT 'NA01'.
+      PARAMETERS: p_upl TYPE localfile LOWER CASE OBLIGATORY."
+      SELECTION-SCREEN END OF BLOCK b1.
+
+      SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME.
+      PARAMETERS: p_test TYPE c AS CHECKBOX.
+      SELECTION-SCREEN END OF BLOCK b2.
+      "-----------------------------------------------------------------------
+      CONSTANTS: c_header TYPE string VALUE 'Header',
+                 c_item   TYPE string VALUE 'Item',
+                 c_bapi   TYPE string VALUE 'BAPI/Standard'.
+      DATA: lv_tabix_header TYPE sy-tabix.
+
+      DATA: lv_path_str TYPE string,
+            lt_filetable TYPE filetable,
+            lv_filetable LIKE LINE OF lt_filetable,
+            lv_rc TYPE i,
+            lv_extension TYPE c LENGTH 255,
+            lv_filename TYPE c LENGTH 255,
+            lv_localfile TYPE localfile.
+
+      DATA: lo_gcl_xml TYPE REF TO cl_xml_document,
+            lv_ret TYPE sy-subrc,
+            lv_rend_rc TYPE sy-subrc,
+            lv_rend_stream TYPE xstring,
+            lv_rend_size TYPE sy-tabix.
+
+      DATA: lt_smum TYPE STANDARD TABLE OF smum_xmltb,
+            lv_smum TYPE smum_xmltb,
+            lt_ret TYPE TABLE OF bapiret2.
+
+      DATA: lt_truxs_t_text_data TYPE truxs_t_text_data.
+
+      DATA: lv_error_message TYPE string,
+            lv_success TYPE c,
+            lv_has_error(1),
+            lv_has_error_header_table(1), " ZCUSSHIP and ZCUSSHIPF
+            lv_has_error_item__table(1). "ZCUSMAT and ZCUSMATF
+      "-----------------------------------------------------------------------
+      TYPES: BEGIN OF ts_range,
+        sign  TYPE  tvarvc-sign,
+        opti  TYPE  tvarvc-opti,
+        low   TYPE  tvarvc-low,
+        high  TYPE  tvarvc-high,
+      END OF ts_range.
+
+      TYPES: BEGIN OF ts_xml,
+        ftr_type TYPE string,
+        row TYPE i,        "Row
+        documenttype TYPE string,   "Doctype
+        companyname TYPE string,   "Company Name
+        postdate TYPE string,   "PostDate
+        posttime TYPE string,   "PostTime
+        vendorname TYPE string,   "VendorName
+        vendorcode TYPE string,   "VendorCode
+        termsdiscount TYPE string,   "TermsDiscount
+        sitecode TYPE zcscod,   "SiteCode
+        sitename TYPE string,  "SiteName
+        siteaddress TYPE string,  "SiteAddress
+        sitetin TYPE string,  "SiteTin
+        documentnumber TYPE string,  "DocumentNumber
+        dateentry TYPE string,  "DateEntry
+        datecancel TYPE string,  "DateCancel
+        datereceipt TYPE string,  "DateReceipt
+        articlecount TYPE string,  "ArticleCount
+        deliverymessage TYPE string,
+        linenumber TYPE string,
+        skumatcode TYPE string,   "SKUMatCode
+        description TYPE string,
+        upc TYPE zcsmat,          "Item Code
+        buyqty TYPE string,
+        buycost TYPE string,
+        buyum TYPE string,
+        ppsitecode TYPE string,
+        ppqty      TYPE string,
+        ppunit     TYPE string,
+        package TYPE string,
+        sellum TYPE string,
+        totalamount TYPE string,
+        importantnotification TYPE string,
+        modified_po TYPE bstkd_m,"bstnk,
+        auart TYPE auart,
+        col32 TYPE string,
+        col33 TYPE string,
+        col34 TYPE string,
+        col35 TYPE string,
+        col36 TYPE string,
+      END OF ts_xml.
+
+      TYPES: BEGIN OF ts_display,
+        row TYPE i,           "Row
+        icon TYPE c LENGTH 4, "Status
+        vbeln TYPE string,     "Sales Order
+        message TYPE string,     "Message
+        err_loc TYPE string,
+      END OF ts_display.
+      TYPES: BEGIN OF ts_display2,
+        row TYPE string,           "Row
+        icon TYPE c LENGTH 4, "Status
+        vbeln TYPE string,     "Sales Order
+        message TYPE string,     "Message
+      END OF ts_display2.
+
+      TYPES: BEGIN OF ts_so_h,
+        audat TYPE vbak-erdat,
+        bstnk TYPE vbak-bstnk,
+        bstdk TYPE vbak-bstdk,
+        mahdt TYPE vbak-mahdt,
+        auart TYPE vbak-auart,
+        vkorg TYPE vbak-vkorg,
+        vtweg TYPE vbak-vtweg,
+        soldt TYPE vbak-kunnr,
+        shipt TYPE vbak-kunnr,
+        vdatu TYPE vbak-vdatu,
+        spart TYPE vbak-spart,
+        vbtyp TYPE vbak-vbtyp,
+        abrvw TYPE vbak-abrvw,
+        END OF ts_so_h.
+
+      TYPES: BEGIN OF ts_kna1_knvp,
+        kunnr TYPE kunnr,
+        vkorg TYPE vkorg,
+        vtweg TYPE vtweg,
+        spart TYPE spart,
+        kunn2 TYPE kunn2,
+        parvw TYPE parvw,
+        ktokd TYPE ktokd,
+        END OF ts_kna1_knvp.
+
+      TYPES: BEGIN OF ts_check_po,
+            kunnr TYPE kunnr,
+            vbeln TYPE vbeln,
+            bstnk TYPE bstnk,
+            bstkd TYPE bstkd,
+        END OF ts_check_po.
+
+      DATA: lt_check_po TYPE TABLE OF ts_check_po,
+            lv_check_po TYPE ts_check_po.
+
+      DATA: lt_xml TYPE STANDARD TABLE OF ts_xml,
+            lv_xml TYPE ts_xml,
+            lt_xml_footer TYPE TABLE OF ts_xml,
+            lv_xml_footer TYPE ts_xml.
+      FIELD-SYMBOLS: <fs_xml> TYPE ts_xml.
+
+      DATA: gt_range TYPE TABLE OF ts_range,
+            gv_range TYPE ts_range.
+
+      DATA: lt_display TYPE TABLE OF ts_display,
+            lv_display TYPE ts_display.
+      DATA: lt_display2 TYPE TABLE OF ts_display2,
+            lv_display2 TYPE ts_display2.
+      FIELD-SYMBOLS: <fs_display> TYPE ts_display,
+                     <fs_display2> TYPE ts_display2.
+
+      DATA: gt_so_h TYPE TABLE OF ts_so_h,
+            gv_so_h TYPE ts_so_h.
+
+      DATA: lo_salv_table TYPE REF TO cl_salv_table,
+            lo_columns TYPE REF TO cl_salv_columns_table,
+            lo_column TYPE REF TO cl_salv_column.
+
+      DATA: lv_count_article TYPE i,
+            lv_count_ftr_child TYPE i.
+
+      CONSTANTS: c_zor TYPE auart VALUE 'ZOR',
+                 c_zdr TYPE auart VALUE 'ZDR',
+                 "+++sapsupport4 abolival C-003478 ,  DD/MM/YYYY = 04.01.2024
+                 c_zos1 TYPE auart VALUE 'ZOS1',
+                 c_zsdr TYPE auart VALUE 'ZSDR'.
+                 "+++
+
+      DATA: lt_ovd_store TYPE TABLE OF zsd_sm_ovd,
+            lv_ovd_store TYPE zsd_sm_ovd.
+
+      DATA: lt_kna1_knvp TYPE TABLE OF  ts_kna1_knvp,
+            lv_kna1_knvp TYPE ts_kna1_knvp.
+
+      CONSTANTS: lv_tvarv_name1 TYPE tvarvc-low VALUE 'ZSD_SMUPLOAD_PO_WITH_T'.
+      DATA: lt_tvarvc TYPE STANDARD TABLE OF tvarvc,
+            lv_tvarvc TYPE tvarvc.
+
+      DATA: lt_zcusship TYPE STANDARD TABLE OF zcusship,
+            lt_zcusship2 TYPE STANDARD TABLE OF zcusship,
+            lt_zcusshipf TYPE STANDARD TABLE OF zcusshipf,
+            lt_zcusshipf2 TYPE STANDARD TABLE OF zcusshipf,
+            lt_zcusmat TYPE STANDARD TABLE OF zcusmat,
+            lt_zcusmatf TYPE STANDARD TABLE OF zcusmatf.
+
+      DATA: lv_zcusship TYPE zcusship,
+            lv_zcusshipf TYPE zcusshipf,
+            lv_zcusship2 TYPE zcusship,
+            lv_zcusshipf2 TYPE zcusshipf,
+            lv_zcusmat TYPE zcusmat,
+            lv_zcusmatf TYPE zcusmatf.
+
+
+      DATA: lv_auart TYPE auart,
+            lv_werks TYPE werks,
+            lv_vkorg TYPE vkorg,
+            lv_bukrs_vkorg TYPE vkorg,
+            lv_vtweg TYPE vtweg,
+            lv_spart TYPE spart,
+            lv_po_no TYPE bstkd,
+            lv_date_cancel TYPE sy-datum,
+            lv_date_receipt TYPE sy-datum,
+            lv_shipto TYPE kunnr,
+            lv_itemcode TYPE zcsmat,
+            lv_matnr  TYPE matnr,
+            lv_total_lineitem TYPE i,
+            lv_article_count TYPE i,
+            lv_posnr TYPE posnr,
+            lv_qty TYPE p DECIMALS 2,
+            lv_uom TYPE vrkme,
+            lv_remarks TYPE string,
+            lv_header_level TYPE c,
+            lv_item_level TYPE c.
+
+      DATA: lv_mm(2),
+            lv_dd(2),
+            lv_yyyy(4).
+
+      DATA: gv_zfds TYPE zcusship-zfds,
+            gv_docday TYPE p LENGTH 8 DECIMALS 0.
+
+      DATA: gv_zor TYPE c, "flag for doc type zor     "+sapsupport2 jdiarios C-003478 04/16/2024
+            gv_zdr TYPE c. "flag for doc type zdr     "+sapsupport2 jdiarios C-003478 04/16/2024
+
+      DATA: lv_count_po TYPE i.
+      DATA: lv_check_current_row TYPE i.
+
+      DATA: lt_t006 TYPE STANDARD TABLE OF t006,
+            ls_t006 TYPE t006.
+"-----------------------------------------------------------------------
+"BAPI
+"-----------------------------------------------------------------------
+DATA: lv_sales_header_in LIKE bapisdhd1,
+      lv_sales_header_in2 LIKE BAPISDHEDU,      "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_header_in3 LIKE BAPISCHDL2,      "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_header_inx LIKE BAPISDITMX,      "sapsupport2 jdiarios C-003478 05/15/2024
+      lt_business_object TYPE STANDARD TABLE OF bapiusw01-objtype.
+
+DATA: lt_return LIKE bapiret2 OCCURS 0 WITH HEADER LINE ,
+      lt_sales_items_in TYPE STANDARD TABLE OF bapisditm,
+      lt_sales_items_inx TYPE STANDARD TABLE OF BAPISCHDLX,          "sapsupport2 jdiarios C-003478 05/15/2024
+      lt_sales_partners TYPE STANDARD TABLE OF bapiparnr,
+      lt_sales_schedules_in TYPE STANDARD TABLE OF bapischdl,
+      lt_sales_schedules_in2 TYPE STANDARD TABLE OF BAPISDHEDU,     "sapsupport2 jdiarios C-003478 05/15/2024
+      lt_sales_schedules_in3 TYPE STANDARD TABLE OF BAPISCHDL2,     "sapsupport2 jdiarios C-003478 05/15/2024
+      lt_sales_schedules_inx TYPE STANDARD TABLE OF BAPISCHDLX,     "sapsupport2 jdiarios C-003478 05/15/2024
+      lt_sales_text TYPE STANDARD TABLE OF bapisdtext.
+
+DATA:
+      lv_business_object TYPE oj_name,
+      lv_testrun TYPE bapiflag-bapiflag.
+
+DATA: lv_salesdocument_ex LIKE bapivbeln-vbeln.
+
+DATA: lv_return LIKE LINE OF lt_return,
+      lv_sales_items_in LIKE LINE OF lt_sales_items_in,
+      lv_sales_items_inx LIKE LINE OF lt_sales_items_inx,            "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_partners LIKE LINE OF lt_sales_partners,
+      lv_sales_schedules_in LIKE LINE OF lt_sales_schedules_in,
+      lv_sales_schedules_in2 LIKE LINE OF lt_sales_schedules_in2,    "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_schedules_in3 LIKE LINE OF lt_sales_schedules_in3,    "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_schedules_inx LIKE LINE OF lt_sales_schedules_inx,    "sapsupport2 jdiarios C-003478 05/15/2024
+      lv_sales_text LIKE LINE OF lt_sales_text .
