@@ -1,0 +1,887 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZSD_ROBINSON_RTVUPLD_F0RM_V1
+*&---------------------------------------------------------------------*
+
+FORM open_file.
+
+*  lv_path = p_path.
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+      window_title            = 'Open File'
+*     default_filename        = lv_path_str
+    CHANGING
+      file_table              = lt_filetable
+      rc                      = lv_rc
+    EXCEPTIONS
+      file_open_dialog_failed = 1
+      cntl_error              = 2
+      error_no_gui            = 3
+      not_supported_by_gui    = 4
+      OTHERS                  = 5.
+
+  IF sy-subrc = 0.
+    READ TABLE lt_filetable INTO ls_filetable INDEX 1.
+    IF sy-subrc = 0.
+      p_path = ls_filetable-filename.
+    ENDIF.
+  ENDIF.
+ENDFORM.                    "open_file
+*&---------------------------------------------------------------------*
+*&      Form  GET_FILE_EXTENSION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_file_extension .
+  lv_filename = p_path.
+  CALL FUNCTION 'TRINT_FILE_GET_EXTENSION'
+    EXPORTING
+      filename  = lv_filename
+      uppercase = 'X'
+    IMPORTING
+      extension = lv_extension.
+
+  IF ( lv_extension <> 'CSV' ) AND ( lv_extension <> 'XLS' ) AND ( lv_extension <> 'TXT' ).
+    MESSAGE text-001 TYPE 'E'.
+  ENDIF.
+
+  SPLIT lv_filename AT '\' INTO TABLE lt_cutpath.
+
+  LOOP AT lt_cutpath INTO ls_cutpath.
+    ls_cuttedpath-col1 = ls_cutpath-col1.
+    ls_cuttedpath-col2 = sy-tabix.
+    APPEND ls_cuttedpath TO lt_cuttedpath.
+  ENDLOOP.
+
+  SORT lt_cuttedpath BY col2 DESCENDING.
+
+  CLEAR: ls_cutpath, lt_cutpath.
+
+  READ TABLE lt_cuttedpath INTO ls_cuttedpath INDEX 1.
+  IF sy-subrc = 0.
+    lv_file = ls_cuttedpath-col1.
+  ENDIF.
+
+  FREE: lt_cuttedpath.
+
+ENDFORM.                    " GET_FILE_EXTENSION
+*&---------------------------------------------------------------------*
+*&      Form  GET_FILE_CONTENTS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_file_contents .
+  lv_localfile = p_path.
+
+  IF lv_extension = 'CSV'.
+    CALL FUNCTION 'KCD_CSV_FILE_TO_INTERN_CONVERT'
+      EXPORTING
+        i_filename      = lv_localfile
+        i_separator     = ','
+      TABLES
+        e_intern        = lt_kcde_intern_struc
+      EXCEPTIONS
+        upload_csv      = 1
+        upload_filetype = 2.
+    IF sy-subrc = 0.
+      LOOP AT lt_kcde_intern_struc.
+        MOVE: lt_kcde_intern_struc-col TO lv_index.
+        ASSIGN COMPONENT lv_index OF STRUCTURE ls_file TO <fs_file>.
+        MOVE: lt_kcde_intern_struc-value TO <fs_file>.
+        AT END OF row.
+          APPEND ls_file TO lt_file_temp.
+          CLEAR ls_file.
+        ENDAT.
+      ENDLOOP.
+    ENDIF.
+
+    UNASSIGN <fs_file>.
+  ENDIF.
+  IF lv_extension = 'XLS' OR lv_extension = 'TXT'.
+
+    CALL FUNCTION 'GET_COMPONENT_LIST'
+      EXPORTING
+        program    = sy-repid
+        fieldname  = 'LS_FILE'
+      TABLES
+        components = lt_rstrucinfo.
+
+    DESCRIBE TABLE lt_rstrucinfo LINES lv_count.
+
+    CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
+      EXPORTING
+        filename                = lv_localfile
+        i_begin_col             = 1
+        i_begin_row             = 1
+        i_end_col               = lv_count
+        i_end_row               = 10000
+      TABLES
+        intern                  = lt_alsmex_tabline
+      EXCEPTIONS
+        inconsistent_parameters = 1
+        upload_ole              = 2
+        OTHERS                  = 3.
+    IF sy-subrc = 0.
+      LOOP AT lt_alsmex_tabline.
+        MOVE: lt_alsmex_tabline-col TO lv_index.
+        ASSIGN COMPONENT lv_index OF STRUCTURE ls_file TO <fs_file>.
+        MOVE: lt_alsmex_tabline-value TO <fs_file>.
+        AT END OF row.
+          APPEND ls_file TO lt_file_temp.
+          CLEAR ls_file.
+        ENDAT.
+      ENDLOOP.
+    ENDIF.
+
+    CLEAR: lv_count.
+
+    UNASSIGN <fs_file>.
+  ENDIF.
+
+
+ENDFORM.                    " GET_FILE_CONTENTS
+*&---------------------------------------------------------------------*
+*&      Form  GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_data .
+  FREE: lt_file.
+
+  lt_file[] = lt_file_temp[].
+  FREE: lt_file_temp.
+
+  DELETE lt_file INDEX 1. "remove header
+
+  READ TABLE lt_salestype INTO ls_salestype WITH KEY bukrs = p_bukrs.
+  IF sy-subrc = 0.
+    ls_vbak-auart = ls_salestype-auart.
+  ENDIF.
+
+  IF p_bukrs = 'NA01'.
+    SELECT * FROM zcusship INTO CORRESPONDING FIELDS OF TABLE lt_zcusship
+      FOR ALL ENTRIES IN lt_file
+      WHERE zcscod = lt_file-col13
+        AND auart  = ls_vbak-auart.
+    IF sy-subrc <> 0.
+      ls_display-row_i = 0.
+      ls_display-message = text-cs1.
+      ls_display-err_type = 'E'.
+      ls_display-err_loc = c_header.
+      PERFORM set_error.
+      lv_stop = 'X'.
+    ELSE.
+      "Get VKORG,VTWEG,SPART
+      SELECT a~kunnr a~ktokd
+             b~kunn2 b~vkorg b~vtweg b~spart b~parvw
+        FROM kna1 AS a INNER JOIN
+             knvp AS b
+        ON a~kunnr = b~kunnr
+        INTO CORRESPONDING FIELDS OF TABLE lt_kna1_knvp
+        FOR ALL ENTRIES IN lt_zcusship
+        WHERE a~ktokd = 'Z001'
+          AND b~parvw = 'WE'
+          AND b~kunn2 = lt_zcusship-kunnr
+        .
+    ENDIF.
+
+  ELSEIF p_bukrs = 'NA02'.
+    SELECT * FROM zcusshipf INTO CORRESPONDING FIELDS OF TABLE lt_zcusshipf
+      FOR ALL ENTRIES IN lt_file
+      WHERE zcscod = lt_file-col13
+        AND auart  = ls_vbak-auart.
+    IF sy-subrc <> 0.
+      ls_display-row_i = 0.
+      ls_display-message = text-cs2.
+      ls_display-err_type = 'E'.
+      ls_display-err_loc = c_header.
+      PERFORM set_error.
+      lv_stop = 'X'.
+    ELSE.
+      "Get VKORG,VTWEG,SPART
+      SELECT a~kunnr a~ktokd
+             b~kunn2 b~vkorg b~vtweg b~spart b~parvw
+        FROM kna1 AS a INNER JOIN
+             knvp AS b
+        ON a~kunnr = b~kunnr
+        INTO CORRESPONDING FIELDS OF TABLE lt_kna1_knvp
+        FOR ALL ENTRIES IN lt_zcusshipf
+        WHERE a~ktokd = 'Z005'
+          AND b~parvw = 'WE'
+          AND b~kunn2 = lt_zcusshipf-kunnr
+        .
+    ENDIF.
+  ENDIF.
+
+  CLEAR: ls_vbak-auart.
+
+  IF lv_stop IS INITIAL.
+    READ TABLE lt_salestype INTO ls_salestype INDEX 1.
+    IF sy-subrc = 0.
+      "Document Type
+      ls_vbak-auart = ls_salestype-auart.
+    ENDIF.
+
+    "Get 1st row for header
+    READ TABLE lt_file INTO ls_file INDEX 1.
+    IF sy-subrc = 0.
+      ls_vbak-audat = sy-datum.
+      ls_vbak-bstnk = ls_file-col10.
+      ls_vbak-reason_code = p_reason.
+
+      IF p_bukrs = 'NA01'.
+        READ TABLE lt_zcusship INTO ls_zcusship WITH KEY zcscod = ls_file-col13
+                                                         auart  = ls_vbak-auart.
+        IF sy-subrc = 0.
+
+          ls_vbak-shipt = ls_zcusship-kunnr.
+          lv_werks       = ls_zcusship-werks.
+          ls_vbak-auart = ls_zcusship-auart.
+          lv_zfds        = ls_zcusship-zfds.
+
+          CALL FUNCTION 'DAY_IN_WEEK'
+            EXPORTING
+              datum = ls_vbak-audat
+            IMPORTING
+              wotnr = gv_docday.
+
+          IF gv_day LE gv_docday.
+            ADD 7 TO  gv_day.
+          ENDIF.
+
+          IF ( gv_day - gv_docday ) LT 2 OR ( ( gv_docday - gv_day ) EQ 2 AND gv_docday EQ 6 ).
+            ADD 7 TO gv_day.
+          ENDIF.
+
+          ls_vbak-vdatu =  ( gv_day - gv_docday ) + ls_vbak-audat.
+
+
+          lv_yymmdd_current = sy-datum.
+          lv_yymmdd = ls_vbak-vdatu.
+
+          IF lv_yymmdd < lv_yymmdd_current.
+            ls_display-row_i = 0.
+            ls_display-message = text-rdd.
+            ls_display-err_type = 'E'.
+            ls_display-err_loc = c_header.
+            PERFORM set_error.
+          ENDIF.
+
+          READ TABLE lt_kna1_knvp INTO ls_kna1_knvp INDEX 1. "can add sales org here if parameter SORG is needed
+          IF sy-subrc = 0.
+            ls_vbak-soldt = ls_kna1_knvp-kunnr.
+            ls_vbak-vkorg = ls_kna1_knvp-vkorg.
+            ls_vbak-vtweg = ls_kna1_knvp-vtweg.
+            ls_vbak-spart = ls_kna1_knvp-spart.
+
+            APPEND ls_vbak TO lt_vbak.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+      IF p_bukrs = 'NA02'.
+        READ TABLE lt_zcusshipf INTO ls_zcusshipf WITH KEY zcscod = ls_file-col13
+                                                           auart  = ls_vbak-auart.
+        IF sy-subrc = 0.
+          ls_vbak-shipt = ls_zcusshipf-kunnr.
+          lv_werks      = ls_zcusshipf-werks.
+          ls_vbak-auart = ls_zcusshipf-auart.
+
+
+
+          CALL FUNCTION 'HR_JP_MONTH_BEGIN_END_DATE'
+            EXPORTING
+              iv_date           = sy-datum
+            IMPORTING
+              ev_month_end_date = lv_endofmonth.   " End date of a month
+
+          ls_vbak-vdatu = lv_endofmonth.
+
+          READ TABLE lt_kna1_knvp INTO ls_kna1_knvp INDEX 1. "can add sales org here if parameter SORG is needed
+          IF sy-subrc = 0.
+            ls_vbak-soldt = ls_kna1_knvp-kunnr.
+            ls_vbak-vkorg = ls_kna1_knvp-vkorg.
+            ls_vbak-vtweg = ls_kna1_knvp-vtweg.
+            ls_vbak-spart = ls_kna1_knvp-spart.
+
+            APPEND ls_vbak TO lt_vbak.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+
+    IF ls_vbak-audat IS INITIAL OR ls_vbak-vdatu IS INITIAL OR ls_vbak-vdatu  < ls_vbak-audat.
+      IF ls_vbak-audat IS INITIAL.
+        ls_display-row_i = 0.
+        ls_display-message = |{ text-dd1 }|.
+        ls_display-err_type = 'E'.
+        ls_display-err_loc = c_item.
+        PERFORM set_error.
+      ENDIF.
+      IF ls_vbak-vdatu < ls_vbak-audat.
+        ls_display-row_i = 0.
+        ls_display-message = |{ text-dd2 }|.
+        ls_display-err_type = 'E'.
+        ls_display-err_loc = c_item.
+        PERFORM set_error.
+      ENDIF.
+    ENDIF.
+
+    PERFORM check_duplicate_po.
+
+  ENDIF.
+
+  IF lt_display IS INITIAL.
+
+    IF p_bukrs = 'NA01'.
+      SELECT * FROM zcusmat INTO CORRESPONDING FIELDS OF TABLE lt_zcusmat
+        FOR ALL ENTRIES IN lt_file
+        WHERE kunnr  = ls_vbak-soldt
+          AND zcsmat = lt_file-col12.
+
+      LOOP AT lt_zcusmat INTO ls_zcusmat.
+        MOVE-CORRESPONDING ls_zcusmat TO ls_zcusmat_merge.
+        APPEND ls_zcusmat_merge TO lt_zcusmat_merge.
+      ENDLOOP.
+    ENDIF.
+
+    IF p_bukrs = 'NA02'.
+      SELECT * FROM zcusmatf INTO CORRESPONDING FIELDS OF TABLE lt_zcusmatf
+        FOR ALL ENTRIES IN lt_file
+        WHERE kunnr  = ls_vbak-soldt
+          AND zcsmat = lt_file-col12.
+
+      LOOP AT lt_zcusmatf INTO ls_zcusmatf.
+        MOVE-CORRESPONDING ls_zcusmatf TO ls_zcusmat_merge.
+        APPEND ls_zcusmat_merge TO lt_zcusmat_merge.
+      ENDLOOP.
+    ENDIF.
+
+    "Check for excluded material
+    IF lt_zcusmat_merge IS NOT INITIAL.
+      CLEAR: lt_kotg501.
+
+      SELECT * FROM kotg501
+        INTO CORRESPONDING FIELDS OF TABLE lt_kotg501
+        FOR ALL ENTRIES IN lt_zcusmat_merge
+        WHERE matnr = lt_zcusmat_merge-matnr.
+
+      CLEAR: lt_kotg502.
+      SELECT * FROM kotg502
+        INTO CORRESPONDING FIELDS OF TABLE lt_kotg502
+        FOR ALL ENTRIES IN lt_zcusmat_merge
+        WHERE matnr = lt_zcusmat_merge-matnr.
+
+      CLEAR: lt_kotg503.
+      SELECT * FROM kotg503
+        INTO CORRESPONDING FIELDS OF TABLE lt_kotg503
+        FOR ALL ENTRIES IN lt_zcusmat_merge
+        WHERE matnr = lt_zcusmat_merge-matnr.
+
+      CLEAR: lt_kotg504.
+      SELECT * FROM kotg504
+        INTO CORRESPONDING FIELDS OF TABLE lt_kotg504
+        FOR ALL ENTRIES IN lt_zcusmat_merge
+        WHERE matnr = lt_zcusmat_merge-matnr.
+
+    ELSE.
+      ls_display-row_i = 0.
+      IF p_bukrs = 'NA01'.
+        ls_display-message = text-cm1.
+      ELSEIF p_bukrs = 'NA02'.
+        ls_display-message = text-cm2.
+      ENDIF.
+      ls_display-err_type = 'E'.
+      ls_display-err_loc = c_item.
+      PERFORM set_error.
+    ENDIF.
+
+    "Item
+    LOOP AT lt_file INTO ls_file.
+      lv_tabix = lv_tabix + 1. "sy-tabix
+
+      READ TABLE lt_zcusmat_merge INTO ls_zcusmat_merge WITH KEY kunnr = ls_vbak-soldt
+                                                                zcsmat = ls_file-col12.
+      IF sy-subrc = 0.
+        ls_vbap-matnr = ls_zcusmat_merge-matnr.
+
+        IF ls_vbap-matnr IS NOT INITIAL.
+
+          LOOP AT lt_kotg501 INTO ls_kotg501.
+            IF ls_vbak-audat  GE ls_kotg501-datab AND ls_vbak-audat LE ls_kotg501-datbi.
+              lv_blocked = 'X'.
+            ENDIF.
+          ENDLOOP.
+
+          LOOP AT lt_kotg502 INTO ls_kotg502.
+            IF ls_vbak-audat  GE ls_kotg502-datab AND ls_vbak-audat LE ls_kotg502-datbi.
+              lv_blocked = 'X'.
+            ENDIF.
+          ENDLOOP.
+
+          LOOP AT lt_kotg503 INTO ls_kotg503.
+            IF ls_vbak-audat  GE ls_kotg503-datab AND ls_vbak-audat LE ls_kotg503-datbi.
+              lv_blocked = 'X'.
+            ENDIF.
+          ENDLOOP.
+
+          LOOP AT lt_kotg504 INTO ls_kotg504.
+            IF ls_vbak-audat  GE ls_kotg504-datab AND ls_vbak-audat LE ls_kotg504-datbi.
+              lv_blocked = 'X'.
+            ENDIF.
+          ENDLOOP.
+
+          IF lv_blocked IS NOT INITIAL.
+            ls_display-row_i = lv_tabix.
+            ls_display-message = |Material { ls_file-col12 } has been excluded|.
+            ls_display-err_type = 'E'.
+            ls_display-err_loc = c_item.
+            PERFORM set_error.
+          ENDIF.
+
+
+
+          lv_posnr = lv_posnr + 10.
+
+          ls_vbap-posnr = lv_posnr.
+          ls_vbap-kwmeng = ls_file-col19.
+          ls_vbap-werks = lv_werks.
+          IF ls_vbap-kwmeng > 0.
+            APPEND ls_vbap TO lt_vbap.
+          ENDIF.
+
+          IF ls_vbap-werks IS INITIAL.
+            ls_display-row_i = lv_tabix.
+            ls_display-message = |Plant is requited|.
+            ls_display-err_type = 'E'.
+            ls_display-err_loc = c_item.
+            PERFORM set_error.
+          ENDIF.
+
+          ls_display-row_i = lv_tabix.
+          ls_display-message = |Material { ls_file-col12 } for customer { ls_vbak-soldt } is maintained|.
+          ls_display-err_type = 'S'.
+          ls_display-err_loc = c_item.
+          PERFORM set_error.
+
+        ELSE.
+          ls_display-row_i = lv_tabix.
+          ls_display-message = |Material { ls_file-col12 } for customer { ls_vbak-soldt } is not maintained|.
+          ls_display-err_type = 'E'.
+          ls_display-err_loc = c_item.
+          PERFORM set_error.
+        ENDIF.
+      ELSE.
+        ls_display-row_i = lv_tabix.
+        ls_display-message = |Material { ls_file-col12 } for customer { ls_vbak-soldt } is not maintained|.
+        ls_display-err_type = 'E'.
+        ls_display-err_loc = c_item.
+        PERFORM set_error.
+      ENDIF.
+
+
+      CLEAR: ls_file, ls_zcusmat_merge, ls_kotg501, ls_kotg502, ls_kotg503, ls_kotg504.
+    ENDLOOP.
+
+
+    READ TABLE lt_display INTO ls_display WITH KEY err_type = 'E'.
+    IF sy-subrc <> 0.
+      READ TABLE lt_vbak INTO ls_vbak INDEX 1.
+
+      CLEAR: lv_date.
+
+      lv_date = sy-datum + 60.
+
+      IF ls_vbak-vdatu >= sy-datum AND ls_vbak-vdatu <= lv_date.
+        ls_vbak-abrvw = p_usgind.
+
+
+        "Populate BAPI
+        PERFORM populate_header_bapi.
+        PERFORM populate_item_bapi.
+        PERFORM bapi_create.
+      ELSE.
+        ls_display-row_i = 0.
+        ls_display-message = |{ text-dd3 }|.
+        ls_display-err_type = 'E'.
+        ls_display-err_loc = c_header.
+        PERFORM set_error.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    " GET_DATA
+*&---------------------------------------------------------------------*
+*&      Form  SET_ERROR
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM set_error .
+  CASE ls_display-err_type.
+    WHEN 'E'.
+      ls_display-traffic = icon_red_light.
+    WHEN 'A'.
+      ls_display-traffic = icon_red_light.
+    WHEN 'W'.
+      ls_display-traffic = icon_yellow_light.
+    WHEN 'S'.
+      ls_display-traffic = icon_green_light.
+    WHEN 'I'.
+      ls_display-traffic = icon_yellow_light.
+  ENDCASE.
+
+  APPEND ls_display TO lt_display.
+ENDFORM.                    " SET_ERROR
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display .
+  DATA: lo_salv TYPE REF TO cl_salv_table,
+        lo_columns TYPE REF TO cl_salv_columns_table,
+        lo_column TYPE REF TO cl_salv_column.
+  DATA: lo_grid_header TYPE REF TO cl_salv_form_layout_grid.
+  DATA: lv_text TYPE string.
+  DATA: lv_col_tabix TYPE i.
+
+  CALL METHOD cl_salv_table=>factory
+    EXPORTING
+      list_display   = if_salv_c_bool_sap=>true
+      container_name = 'Logs'
+    IMPORTING
+      r_salv_table   = lo_salv
+    CHANGING
+      t_table        = lt_display_final.
+
+
+  CREATE OBJECT lo_grid_header.
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    1
+      column  =    1
+      text    =  'Processing Log'
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    3
+      column  =    1
+      text    =  'File name:'
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    3
+      column  =    2
+      text    =    lv_file
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    4
+      column  =    1
+      text    =  'Company Code:'
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    4
+      column  =    2
+      text    =    p_bukrs
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    5
+      column  =    1
+      text    =  'Document Type:'
+  ).
+
+  lo_grid_header->create_header_information(
+    EXPORTING
+      row     =    5
+      column  =    2
+      text    =    ls_salestype-auart
+  ).
+
+  lo_salv->set_top_of_list( value = lo_grid_header ).
+
+
+  lo_columns = lo_salv->get_columns( ).
+
+  lo_column = lo_columns->get_column( 'TRAFFIC' ).
+  lo_column->set_short_text( 'Status' ).
+  lo_column->set_medium_text( 'Status' ).
+  lo_column->set_long_text( 'Status' ).
+
+  lo_column = lo_columns->get_column( 'ERR_TYPE' ).
+  lo_column->set_short_text( 'ErrTyp' ).
+  lo_column->set_medium_text( 'Error Type' ).
+  lo_column->set_long_text( 'Error Type' ).
+  lo_column->set_output_length( value = 20 ).
+
+  lo_column = lo_columns->get_column( 'ERR_LOC' ).
+  lo_column->set_short_text( 'Loc' ).
+  lo_column->set_medium_text( 'Location' ).
+  lo_column->set_long_text( 'Location' ).
+
+  lo_column = lo_columns->get_column( 'ROW_I' ).
+  lo_column->set_short_text( 'Row' ).
+  lo_column->set_medium_text( 'Row' ).
+  lo_column->set_long_text( 'Row' ).
+
+  lo_column = lo_columns->get_column( 'VBELN' ).
+  lo_column->set_short_text( 'SO' ).
+  lo_column->set_medium_text( 'Sales Order' ).
+  lo_column->set_long_text( 'Sales Order' ).
+
+  lo_column = lo_columns->get_column( 'MESSAGE' ).
+  lo_column->set_short_text( 'Message' ).
+  lo_column->set_medium_text( 'Message' ).
+  lo_column->set_long_text( 'Message' ).
+
+  lo_columns->set_optimize( ).
+  lo_salv->display( ).
+ENDFORM.                    " DISPLAY
+*&---------------------------------------------------------------------*
+*&      Form  GET_SO_DOCTYPE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_so_doctype .
+  IF p_bukrs = 'NA01'.
+    SELECT * FROM tvarvc INTO CORRESPONDING FIELDS OF TABLE lt_tvarvc_doctype
+      WHERE name = 'ZSD_ROBINSON_RTVUPLD_V1_NAI'.
+    IF sy-subrc = 0.
+      LOOP AT lt_tvarvc_doctype INTO ls_tvarvc_doctype.
+        ls_salestype-bukrs = 'NA01'.
+        ls_salestype-auart = ls_tvarvc_doctype-low.
+        ls_salestype-vkorg = '1000'.
+        APPEND ls_salestype TO lt_salestype.
+        CLEAR: ls_salestype.
+      ENDLOOP.
+    ELSE.
+      ls_display-message = 'Document Type is not maintained in STVARV: ZSD_ROBINSON_RTVUPLD_V1_NAI'.
+      ls_display-row_i   = 0.
+      ls_display-err_type = 'E'.
+      ls_display-err_loc = c_header.
+      PERFORM set_error.
+    ENDIF.
+
+  ELSEIF p_bukrs = 'NA02'.
+    SELECT * FROM tvarvc INTO CORRESPONDING FIELDS OF TABLE lt_tvarvc_doctype
+      WHERE name = 'ZSD_ROBINSON_RTVUPLD_V1_FP'.
+    IF sy-subrc = 0.
+      LOOP AT lt_tvarvc_doctype INTO ls_tvarvc_doctype.
+        ls_salestype-bukrs = 'NA02'.
+        ls_salestype-auart = ls_tvarvc_doctype-low.
+        ls_salestype-vkorg = '5000'.
+        APPEND ls_salestype TO lt_salestype.
+        CLEAR: ls_salestype.
+      ENDLOOP.
+    ELSE.
+      ls_display-message = 'Document Type is not maintained in STVARV: ZSD_ROBINSON_RTVUPLD_V1_FP'.
+      ls_display-row_i   = 0.
+      ls_display-err_type = 'E'.
+      ls_display-err_loc = c_header.
+      PERFORM set_error.
+    ENDIF.
+  ENDIF.
+
+  CLEAR: ls_tvarvc_doctype,ls_salestype.
+ENDFORM.                    " GET_SO_DOCTYPE
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_DUPLICATE_PO
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_duplicate_po .
+  SELECT SINGLE a~vbeln
+              a~bstkd
+  INTO (lv_vbeln, lv_bstkd)
+  FROM vbkd AS a INNER JOIN
+       vbak AS b
+  ON a~vbeln = b~vbeln
+  WHERE  a~bstkd_m = ls_vbak-bstnk
+  AND a~posnr = space
+  AND b~auart = ls_vbak-auart
+  AND b~kunnr = ls_vbak-soldt
+  AND b~vkorg = ls_salestype-vkorg.
+
+  IF sy-subrc = 0.
+    ls_display-row_i = 0.
+    ls_display-message = |{ text-po1 } { ls_vbak-bstnk } { text-so1 } { lv_vbeln }|.
+    ls_display-err_type = 'E'.
+    ls_display-err_loc = c_header.
+    PERFORM set_error.
+  ENDIF.
+ENDFORM.                    " CHECK_DUPLICATE_PO
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_HEADER_BAPI
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_header_bapi .
+  ls_order_header_in-doc_type   = ls_vbak-auart.
+  ls_order_header_in-price_date = sy-datum.
+  ls_order_header_in-sales_org  = ls_vbak-vkorg.
+  ls_order_header_in-distr_chan = ls_vbak-vtweg.
+  ls_order_header_in-req_date_h = ls_vbak-vdatu.
+  ls_order_header_in-doc_date   = ls_vbak-audat.
+  ls_order_header_in-purch_no_c = ls_vbak-bstnk.
+  ls_order_header_in-ord_reason = ls_vbak-reason_code.
+  ls_order_header_in-dlvschduse = ls_vbak-abrvw.
+
+  CLEAR: ls_sales_partners.
+  ls_sales_partners-partn_role = 'WE'.
+  ls_sales_partners-partn_numb = ls_vbak-shipt.
+  APPEND ls_sales_partners TO lt_sales_partners.
+
+  CLEAR: ls_sales_partners.
+  ls_sales_partners-partn_role = 'AG'.
+  ls_sales_partners-partn_numb = ls_vbak-soldt.
+  APPEND ls_sales_partners TO lt_sales_partners.
+
+  CLEAR: ls_return_partners.
+  ls_return_partners-partn_role = 'WE'.
+  ls_return_partners-partn_numb = ls_vbak-shipt.
+  APPEND ls_return_partners TO lt_return_partners.
+
+  CLEAR: ls_return_partners.
+  ls_return_partners-partn_role = 'AG'.
+  ls_return_partners-partn_numb = ls_vbak-soldt.
+  APPEND ls_return_partners TO lt_return_partners.
+ENDFORM.                    " POPULATE_HEADER_BAPI
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_ITEM_BAPI
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_item_bapi .
+  LOOP AT lt_vbap INTO ls_vbap.
+
+    ls_vbap-vkaus = p_usgind.
+
+    CLEAR: ls_sales_items_in.
+    ls_sales_items_in-itm_number   =  ls_vbap-posnr.
+    ls_sales_items_in-material     =  ls_vbap-matnr.
+    ls_sales_items_in-plant        =  ls_vbap-werks.
+    ls_sales_items_in-target_qty   =  ls_vbap-kwmeng.
+    ls_sales_items_in-sales_unit   =  'PC'. "Not sure if PC is the Default/Fix UoM
+    ls_sales_items_in-usage_ind    =  ls_vbap-vkaus.
+    APPEND ls_sales_items_in TO lt_sales_items_in.
+
+    ls_sales_schedules_in-itm_number = ls_vbap-posnr.
+    ls_sales_schedules_in-req_qty    = ls_vbap-kwmeng.
+    APPEND ls_sales_schedules_in  TO lt_sales_schedules_in.
+
+  ENDLOOP.
+ENDFORM.                    " POPULATE_ITEM_BAPI
+*&---------------------------------------------------------------------*
+*&      Form  BAPI_CREATE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM bapi_create .
+  CALL FUNCTION 'SD_SALESDOCUMENT_CREATE'
+    EXPORTING
+      sales_header_in    = ls_order_header_in
+      business_object    = lc_business_obj
+      testrun            = p_test
+    IMPORTING
+      salesdocument_ex   = ls_salesdocument
+    TABLES
+      return             = lt_return
+      sales_items_in     = lt_sales_items_in
+      sales_partners     = lt_sales_partners
+      sales_schedules_in = lt_sales_schedules_in.
+  .
+  IF ls_salesdocument <> space.
+    IF p_test <> 'X'.
+      COMMIT WORK.
+    ENDIF.
+    ls_display-row_i = 0.
+    ls_display-message = |Order { ls_salesdocument } has been created|.
+    ls_display-err_type = 'S'.
+    ls_display-err_loc = c_header.
+    PERFORM set_error.
+  ELSE.
+    LOOP AT lt_return.
+      ls_display-row_i = 0.
+      IF lt_return-type = 'E'.
+        ls_display-err_type = 'E'. "Error
+      ELSEIF lt_return-type = 'A'.
+        ls_display-err_type = 'A'. "Abort
+      ELSEIF lt_return-type = 'S'.
+        ls_display-err_type = 'S'. "Success
+      ELSEIF lt_return-type = 'W'.
+        ls_display-err_type = 'W'. "Warning
+      ELSEIF lt_return-type = 'I'.
+        ls_display-err_type = 'I'. "Info
+      ENDIF.
+      ls_display-err_loc = |{ c_bapi } { lt_return-parameter }|.
+      ls_display-message = |{ lt_return-message }|.
+      PERFORM set_error.
+    ENDLOOP.
+  ENDIF.
+
+  CLEAR: ls_order_header_in, ls_salesdocument, ls_sales_items_in, ls_sales_partners, ls_sales_schedules_in,
+         lt_sales_items_in, lt_sales_partners, lt_sales_schedules_in.
+ENDFORM.                    " BAPI_CREATE
+*&---------------------------------------------------------------------*
+*&      Form  MODIFY_ERROR
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM modify_display .
+
+ LOOP AT lt_display INTO ls_display.
+   MOVE-CORRESPONDING ls_display TO ls_display_final.
+   ls_display_final-row_i = ls_display-row_i.
+   IF ls_display-row_i = 0.
+     CLEAR: ls_display_final-row_i.
+   ENDIF.
+   APPEND ls_display_final TO lt_display_final.
+   CLEAR: ls_display.
+ ENDLOOP.
+
+ FREE: lt_display.
+
+ENDFORM.                    " MODIFY_ERROR
